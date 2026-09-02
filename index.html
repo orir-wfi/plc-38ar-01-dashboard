@@ -1,0 +1,559 @@
+<title>PLC-38AR-01</title>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<script src="https://cdn.jsdelivr.net/npm/mqtt@5.10.1/dist/mqtt.min.js" integrity="sha384-u4uqeACkFcoKl57rBQJHVGDd1pqhW4w8X3WjTu1ZksPdxoLqdt34jpoNkJisE25W" crossorigin="anonymous"></script>
+<style>
+  :root{
+    --bg:#f4f6f7;
+    --surface:#ffffff;
+    --surface-2:#eef2f3;
+    --border:#dbe2e4;
+    --ink:#16232a;
+    --ink-2:#4c626c;
+    --ink-3:#7d939c;
+    --accent:#0e7c86;
+    --accent-ink:#ffffff;
+    --accent-tint:#e2f2f2;
+    --good:#1f8a4c;
+    --warning:#966018;
+    --critical:#c23b3b;
+    --critical-tint:#fbeaea;
+    --focus:#0e7c86;
+    --shadow: 0 1px 2px rgba(22,35,42,.06), 0 6px 20px rgba(22,35,42,.05);
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --bg:#0d1417;
+      --surface:#141d21;
+      --surface-2:#192327;
+      --border:#26343a;
+      --ink:#e7eef0;
+      --ink-2:#a9bcc2;
+      --ink-3:#728990;
+      --accent:#2fb8c4;
+      --accent-ink:#06181a;
+      --accent-tint:#122a2d;
+      --good:#3fbd74;
+      --warning:#e0a53f;
+      --critical:#e2585b;
+      --critical-tint:#2a1516;
+      --focus:#2fb8c4;
+      --shadow: 0 1px 2px rgba(0,0,0,.3), 0 8px 24px rgba(0,0,0,.35);
+    }
+  }
+  :root[data-theme="dark"]{
+    --bg:#0d1417;
+    --surface:#141d21;
+    --surface-2:#192327;
+    --border:#26343a;
+    --ink:#e7eef0;
+    --ink-2:#a9bcc2;
+    --ink-3:#728990;
+    --accent:#2fb8c4;
+    --accent-ink:#06181a;
+    --accent-tint:#122a2d;
+    --good:#3fbd74;
+    --warning:#e0a53f;
+    --critical:#e2585b;
+    --critical-tint:#2a1516;
+    --focus:#2fb8c4;
+    --shadow: 0 1px 2px rgba(0,0,0,.3), 0 8px 24px rgba(0,0,0,.35);
+  }
+
+  *{box-sizing:border-box;}
+  body{
+    background:var(--bg);
+    color:var(--ink);
+    font-family:"IBM Plex Sans",system-ui,-apple-system,Segoe UI,sans-serif;
+    font-size:14px;
+    line-height:1.5;
+  }
+  .mono{ font-family:"IBM Plex Mono","SF Mono",Consolas,monospace; font-variant-numeric:tabular-nums; }
+  .eyebrow{
+    font-family:"IBM Plex Mono",monospace;
+    font-size:11px;
+    font-weight:500;
+    letter-spacing:.09em;
+    text-transform:uppercase;
+    color:var(--ink-3);
+  }
+
+  .wrap{ max-width:920px; margin:0 auto; padding:28px 20px 56px; }
+
+  header.top{
+    display:flex; align-items:flex-start; justify-content:space-between; gap:16px;
+    flex-wrap:wrap;
+    margin-bottom:22px;
+  }
+  .identity h1{
+    margin:2px 0 0;
+    font-size:22px; font-weight:700; letter-spacing:-.01em;
+    text-wrap:balance;
+    font-family:"IBM Plex Mono",monospace;
+  }
+  .identity .sub{ color:var(--ink-2); font-size:13px; margin-top:4px; }
+
+  .status-block{ text-align:right; display:flex; flex-direction:column; align-items:flex-end; gap:6px; }
+  .pill{
+    display:inline-flex; align-items:center; gap:7px;
+    padding:5px 11px; border-radius:100px;
+    font-size:12.5px; font-weight:600;
+    border:1px solid var(--border);
+    background:var(--surface);
+  }
+  .pill .dot{ width:7px; height:7px; border-radius:50%; background:var(--ink-3); flex:none; }
+  .pill.live{ color:var(--good); border-color:color-mix(in srgb, var(--good) 35%, var(--border)); background:color-mix(in srgb, var(--good) 8%, var(--surface)); }
+  .pill.live .dot{ background:var(--good); box-shadow:0 0 0 3px color-mix(in srgb, var(--good) 22%, transparent); animation:pulse 2.2s ease-in-out infinite; }
+  .pill.stale{ color:var(--warning); border-color:color-mix(in srgb, var(--warning) 35%, var(--border)); background:color-mix(in srgb, var(--warning) 8%, var(--surface)); }
+  .pill.stale .dot{ background:var(--warning); }
+  .pill.down{ color:var(--critical); border-color:color-mix(in srgb, var(--critical) 35%, var(--border)); background:color-mix(in srgb, var(--critical) 8%, var(--surface)); }
+  .pill.down .dot{ background:var(--critical); }
+  .pill.idle{ color:var(--ink-2); }
+  @media (prefers-reduced-motion: reduce){ .pill.live .dot{ animation:none; } }
+  @keyframes pulse{ 0%,100%{ box-shadow:0 0 0 3px color-mix(in srgb, var(--good) 22%, transparent);} 50%{ box-shadow:0 0 0 6px color-mix(in srgb, var(--good) 10%, transparent);} }
+
+  .last-seen{ font-size:12px; color:var(--ink-3); }
+
+  section.panel{
+    background:var(--surface);
+    border:1px solid var(--border);
+    border-radius:14px;
+    box-shadow:var(--shadow);
+    margin-bottom:18px;
+    overflow:hidden;
+  }
+  .panel-head{
+    display:flex; align-items:center; justify-content:space-between; gap:12px;
+    padding:14px 18px;
+    border-bottom:1px solid var(--border);
+    cursor:pointer;
+    user-select:none;
+  }
+  .panel-head h2{ margin:0; font-size:14.5px; font-weight:600; display:flex; align-items:center; gap:8px; }
+  .panel-head .chev{ color:var(--ink-3); font-size:12px; transition:transform .15s ease; }
+  .panel-head .summary{ font-size:12.5px; color:var(--ink-2); font-weight:400; }
+  .panel-body{ padding:16px 18px 18px; }
+  .panel.collapsed .panel-body{ display:none; }
+  .panel.collapsed .chev{ transform:rotate(-90deg); }
+
+  form.conn-form{ display:grid; grid-template-columns:1.6fr .7fr 1fr 1fr auto; gap:10px; align-items:end; }
+  @media (max-width:720px){ form.conn-form{ grid-template-columns:1fr 1fr; } form.conn-form .full{ grid-column:1/-1; } }
+  .field label{ display:block; font-size:12px; color:var(--ink-2); margin-bottom:5px; font-weight:500; }
+  .field input{
+    width:100%;
+    background:var(--surface-2);
+    border:1px solid var(--border);
+    border-radius:8px;
+    padding:8px 10px;
+    color:var(--ink);
+    font-size:13px;
+    font-family:"IBM Plex Mono",monospace;
+  }
+  .field input:focus{ outline:2px solid var(--focus); outline-offset:1px; }
+  button{
+    font-family:inherit; font-size:13px; font-weight:600;
+    border-radius:8px; border:1px solid transparent;
+    padding:9px 16px; cursor:pointer;
+  }
+  button.primary{ background:var(--accent); color:var(--accent-ink); }
+  button.primary:hover{ filter:brightness(1.06); }
+  button.primary:disabled{ opacity:.55; cursor:default; }
+  button.ghost{ background:transparent; border-color:var(--border); color:var(--ink-2); }
+  button.ghost:hover{ background:var(--surface-2); }
+  .note{ margin-top:10px; font-size:12px; color:var(--ink-3); line-height:1.55; }
+  .conn-error{ margin-top:10px; font-size:12.5px; color:var(--critical); display:none; }
+  .conn-error.show{ display:block; }
+
+  .groups{ display:grid; grid-template-columns:1.05fr .95fr; gap:18px; align-items:start; }
+  @media (max-width:760px){ .groups{ grid-template-columns:1fr; } }
+
+  .group-title{ font-size:13px; font-weight:600; margin:0 0 3px; }
+  .group-caption{ font-size:12px; color:var(--ink-3); margin:0 0 12px; }
+
+  .di-grid{ display:grid; grid-template-columns:repeat(2,1fr); gap:8px; }
+  .di-tile{
+    display:flex; align-items:center; gap:9px;
+    border:1px solid var(--border); border-radius:10px;
+    padding:9px 10px;
+    background:var(--surface-2);
+  }
+  .di-dot{ width:9px; height:9px; border-radius:50%; background:var(--border); border:1px solid var(--ink-3); flex:none; }
+  .di-tile[data-state="1"] .di-dot{ background:var(--accent); border-color:var(--accent); }
+  .di-body{ min-width:0; }
+  .di-name{ font-family:"IBM Plex Mono",monospace; font-size:12px; color:var(--ink); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .di-state{ font-size:10.5px; letter-spacing:.05em; color:var(--ink-3); font-weight:600; }
+  .di-tile[data-state="1"] .di-state{ color:var(--accent); }
+
+  .ai-grid{ display:flex; flex-direction:column; gap:8px; }
+  .ai-tile{
+    display:flex; align-items:baseline; justify-content:space-between;
+    border:1px solid var(--border); border-radius:10px;
+    padding:12px 14px;
+    background:var(--surface-2);
+  }
+  .ai-name{ font-family:"IBM Plex Mono",monospace; font-size:12.5px; color:var(--ink-2); }
+  .ai-value-wrap{ text-align:right; }
+  .ai-value{ font-family:"IBM Plex Mono",monospace; font-size:24px; font-weight:600; }
+  .ai-unit{ font-size:10.5px; color:var(--ink-3); letter-spacing:.03em; }
+
+  .alerts-list{ display:flex; flex-direction:column; gap:0; max-height:280px; overflow-y:auto; }
+  .alert-row{ display:flex; gap:12px; padding:9px 0; border-bottom:1px solid var(--border); }
+  .alert-row:last-child{ border-bottom:none; }
+  .alert-time{ font-family:"IBM Plex Mono",monospace; font-size:11.5px; color:var(--ink-3); flex:none; padding-top:1px; }
+  .alert-msg{ font-size:13px; color:var(--ink); }
+  .alerts-empty{ font-size:13px; color:var(--ink-3); padding:6px 0; }
+
+  footer.foot{ margin-top:22px; font-size:11.5px; color:var(--ink-3); text-align:center; }
+  a{ color:var(--accent); }
+</style>
+
+<div class="wrap">
+
+  <header class="top">
+    <div class="identity">
+      <div class="eyebrow">ESP32 PLC 38AR+ &middot; read-only viewer</div>
+      <h1 id="deviceId">plc-38ar-01</h1>
+      <div class="sub">Digital &amp; analog inputs, live over MQTT &middot; telemetry publishes on a 60s cycle</div>
+    </div>
+    <div class="status-block">
+      <span class="pill idle" id="statusPill"><span class="dot"></span><span id="statusText">Not connected</span></span>
+      <span class="last-seen" id="lastSeen">No telemetry received yet</span>
+    </div>
+  </header>
+
+  <section class="panel" id="connPanel">
+    <div class="panel-head" id="connPanelHead">
+      <h2>Broker connection <span class="summary" id="connSummary"></span></h2>
+      <span class="chev">&#9660;</span>
+    </div>
+    <div class="panel-body">
+      <form class="conn-form" id="connForm">
+        <div class="field full" style="grid-column:1/2;">
+          <label for="fHost">Broker host</label>
+          <input id="fHost" type="text" placeholder="xxxxxxxx.s1.eu.hivemq.cloud" autocomplete="off" spellcheck="false">
+        </div>
+        <div class="field">
+          <label for="fPort">WSS port</label>
+          <input id="fPort" type="text" placeholder="8884" autocomplete="off">
+        </div>
+        <div class="field">
+          <label for="fUser">Viewer username</label>
+          <input id="fUser" type="text" autocomplete="off" spellcheck="false">
+        </div>
+        <div class="field">
+          <label for="fPass">Viewer password</label>
+          <input id="fPass" type="password" autocomplete="off">
+        </div>
+        <div>
+          <button type="submit" class="primary" id="connectBtn">Connect</button>
+        </div>
+      </form>
+      <div class="conn-error" id="connError"></div>
+      <p class="note">
+        Uses the <strong>viewer-tier</strong> MQTT credential &mdash; broker-enforced subscribe-only on
+        <span class="mono">plc/plc-38ar-01/+</span>, no write access, no HMAC key involved. Credentials are kept only in
+        this browser's local storage and sent directly to your broker over TLS (WSS); nothing passes through Claude.
+        Use <a href="#" id="disconnectLink">disconnect</a> to clear the connection.
+      </p>
+    </div>
+  </section>
+
+  <div class="groups">
+    <section class="panel">
+      <div class="panel-body">
+        <p class="group-title">Digital inputs</p>
+        <p class="group-caption">Raw contact state &middot; shown as reported, polarity not interpreted here</p>
+        <div class="di-grid" id="diGrid"></div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-body">
+        <p class="group-title">Analog inputs</p>
+        <p class="group-caption">Raw 11-bit ADC counts, 0&ndash;2047 &middot; no engineering-unit scaling applied</p>
+        <div class="ai-grid" id="aiGrid"></div>
+      </div>
+    </section>
+  </div>
+
+  <section class="panel">
+    <div class="panel-body">
+      <p class="group-title">Alerts</p>
+      <p class="group-caption">Messages published by the PLC on <span class="mono">plc/plc-38ar-01/alerts</span> this session</p>
+      <div class="alerts-list" id="alertsList">
+        <div class="alerts-empty" id="alertsEmpty">No alerts received yet this session.</div>
+      </div>
+    </div>
+  </section>
+
+  <footer class="foot">plc-38ar-01 &middot; viewer dashboard &middot; values reset on page reload, nothing is stored remotely</footer>
+</div>
+
+<script>
+(function(){
+  var DEVICE_ID = "plc-38ar-01";
+  var TOPIC_TELEMETRY = "plc/" + DEVICE_ID + "/telemetry";
+  var TOPIC_ALERTS = "plc/" + DEVICE_ID + "/alerts";
+  var STALE_MS = 90000; // 90s: 1.5x the firmware's 60s publish interval
+
+  var DIGITAL_TAGS = ["System_Switch","Reset_Inactive_Alarms","Q_Stop","P1_OL","P2_OL","P3_OL","P4_OL","P5_OL","FT101_P","LS0_low"];
+  var ANALOG_TAGS = ["LT01","LT02","AIT01_NO3"];
+
+  var STORE_KEY = "plcmon.plc-38ar-01.conn";
+
+  var client = null;
+  var lastSeenAt = null;
+  var freshnessTimer = null;
+
+  var els = {
+    statusPill: document.getElementById("statusPill"),
+    statusText: document.getElementById("statusText"),
+    lastSeen: document.getElementById("lastSeen"),
+    connPanel: document.getElementById("connPanel"),
+    connPanelHead: document.getElementById("connPanelHead"),
+    connSummary: document.getElementById("connSummary"),
+    connForm: document.getElementById("connForm"),
+    connectBtn: document.getElementById("connectBtn"),
+    connError: document.getElementById("connError"),
+    fHost: document.getElementById("fHost"),
+    fPort: document.getElementById("fPort"),
+    fUser: document.getElementById("fUser"),
+    fPass: document.getElementById("fPass"),
+    disconnectLink: document.getElementById("disconnectLink"),
+    diGrid: document.getElementById("diGrid"),
+    aiGrid: document.getElementById("aiGrid"),
+    alertsList: document.getElementById("alertsList"),
+    alertsEmpty: document.getElementById("alertsEmpty")
+  };
+
+  function buildTiles(){
+    DIGITAL_TAGS.forEach(function(tag){
+      var tile = document.createElement("div");
+      tile.className = "di-tile";
+      tile.dataset.state = "";
+      tile.id = "di-" + tag;
+      tile.innerHTML = '<span class="di-dot"></span><span class="di-body"><div class="di-name">' + tag +
+        '</div><div class="di-state">&mdash;</div></span>';
+      els.diGrid.appendChild(tile);
+    });
+    ANALOG_TAGS.forEach(function(tag){
+      var tile = document.createElement("div");
+      tile.className = "ai-tile";
+      tile.id = "ai-" + tag;
+      tile.innerHTML = '<span class="ai-name">' + tag + '</span><span class="ai-value-wrap">' +
+        '<div class="ai-value">&mdash;</div><div class="ai-unit">raw ADC</div></span>';
+      els.aiGrid.appendChild(tile);
+    });
+  }
+
+  function setStatus(kind, text){
+    els.statusPill.className = "pill " + kind;
+    els.statusText.textContent = text;
+  }
+
+  function updateLastSeenLabel(){
+    if(!lastSeenAt){
+      els.lastSeen.textContent = "No telemetry received yet";
+      return;
+    }
+    var secs = Math.round((Date.now() - lastSeenAt) / 1000);
+    els.lastSeen.textContent = "Last telemetry " + secs + "s ago";
+  }
+
+  function checkFreshness(){
+    updateLastSeenLabel();
+    if(!client || !client.connected) return;
+    if(!lastSeenAt){
+      setStatus("idle", "Connected — waiting for first telemetry");
+      return;
+    }
+    var age = Date.now() - lastSeenAt;
+    if(age > STALE_MS){
+      setStatus("stale", "Connected — telemetry stale");
+    } else {
+      setStatus("live", "Live");
+    }
+  }
+
+  function applyTelemetry(json){
+    lastSeenAt = Date.now();
+    DIGITAL_TAGS.forEach(function(tag){
+      if(!(tag in json)) return;
+      var val = json[tag];
+      var tile = document.getElementById("di-" + tag);
+      if(!tile) return;
+      tile.dataset.state = String(val);
+      tile.querySelector(".di-state").textContent = val ? "ON" : "OFF";
+    });
+    ANALOG_TAGS.forEach(function(tag){
+      if(!(tag in json)) return;
+      var tile = document.getElementById("ai-" + tag);
+      if(!tile) return;
+      tile.querySelector(".ai-value").textContent = json[tag];
+    });
+    checkFreshness();
+  }
+
+  function addAlert(message){
+    if(els.alertsEmpty) { els.alertsEmpty.remove(); els.alertsEmpty = null; }
+    var row = document.createElement("div");
+    row.className = "alert-row";
+    var t = new Date();
+    var hh = String(t.getHours()).padStart(2,"0");
+    var mm = String(t.getMinutes()).padStart(2,"0");
+    var ss = String(t.getSeconds()).padStart(2,"0");
+    row.innerHTML = '<span class="alert-time">' + hh + ":" + mm + ":" + ss + '</span><span class="alert-msg"></span>';
+    row.querySelector(".alert-msg").textContent = message;
+    els.alertsList.insertBefore(row, els.alertsList.firstChild);
+    while(els.alertsList.children.length > 50){
+      els.alertsList.removeChild(els.alertsList.lastChild);
+    }
+  }
+
+  function saveConn(host, port, user, pass){
+    try{
+      localStorage.setItem(STORE_KEY, JSON.stringify({host:host, port:port, user:user, pass:pass}));
+    }catch(e){}
+  }
+  function loadConn(){
+    try{
+      var raw = localStorage.getItem(STORE_KEY);
+      return raw ? JSON.parse(raw) : null;
+    }catch(e){ return null; }
+  }
+  function clearConn(){
+    try{ localStorage.removeItem(STORE_KEY); }catch(e){}
+  }
+
+  function collapseConnPanel(hostLabel){
+    els.connPanel.classList.add("collapsed");
+    els.connSummary.textContent = "— " + hostLabel;
+  }
+  function expandConnPanel(){
+    els.connPanel.classList.remove("collapsed");
+    els.connSummary.textContent = "";
+  }
+
+  els.connPanelHead.addEventListener("click", function(){
+    els.connPanel.classList.toggle("collapsed");
+  });
+
+  function doDisconnect(){
+    if(client){
+      client.end(true);
+      client = null;
+    }
+    lastSeenAt = null;
+    setStatus("idle", "Not connected");
+    els.lastSeen.textContent = "No telemetry received yet";
+    els.connectBtn.disabled = false;
+    els.connectBtn.textContent = "Connect";
+    expandConnPanel();
+  }
+
+  els.disconnectLink.addEventListener("click", function(e){
+    e.preventDefault();
+    clearConn();
+    doDisconnect();
+  });
+
+  function connect(host, port, user, pass){
+    els.connError.classList.remove("show");
+    if(!host){
+      els.connError.textContent = "Enter the broker host first.";
+      els.connError.classList.add("show");
+      return;
+    }
+    port = port || "8884";
+    els.connectBtn.disabled = true;
+    els.connectBtn.textContent = "Connecting…";
+    setStatus("idle", "Connecting…");
+
+    var url = "wss://" + host + ":" + port + "/mqtt";
+    try{
+      client = mqtt.connect(url, {
+        username: user,
+        password: pass,
+        clientId: "plcmon-" + Math.random().toString(16).slice(2, 10),
+        reconnectPeriod: 4000,
+        connectTimeout: 8000,
+        clean: true
+      });
+    } catch(err){
+      els.connError.textContent = "Could not open connection: " + err.message;
+      els.connError.classList.add("show");
+      els.connectBtn.disabled = false;
+      els.connectBtn.textContent = "Connect";
+      setStatus("down", "Connection failed");
+      return;
+    }
+
+    client.on("connect", function(){
+      els.connectBtn.disabled = false;
+      els.connectBtn.textContent = "Reconnect";
+      setStatus("idle", "Connected — waiting for first telemetry");
+      collapseConnPanel(host);
+      client.subscribe([TOPIC_TELEMETRY, TOPIC_ALERTS], function(err){
+        if(err){
+          els.connError.textContent = "Connected, but subscribe failed: " + err.message + " (check the viewer credential's broker permission).";
+          els.connError.classList.add("show");
+        }
+      });
+    });
+
+    client.on("message", function(topic, payload){
+      var text = payload.toString();
+      if(topic === TOPIC_TELEMETRY){
+        try{ applyTelemetry(JSON.parse(text)); }catch(e){}
+      } else if(topic === TOPIC_ALERTS){
+        addAlert(text);
+      }
+    });
+
+    client.on("reconnect", function(){
+      setStatus("stale", "Reconnecting…");
+    });
+
+    client.on("close", function(){
+      if (els.statusText.textContent !== "Not connected") setStatus("down", "Disconnected");
+    });
+
+    client.on("error", function(err){
+      els.connError.textContent = "Broker error: " + (err && err.message ? err.message : String(err));
+      els.connError.classList.add("show");
+      setStatus("down", "Connection error");
+      els.connectBtn.disabled = false;
+      els.connectBtn.textContent = "Connect";
+    });
+  }
+
+  els.connForm.addEventListener("submit", function(e){
+    e.preventDefault();
+    var host = els.fHost.value.trim();
+    var port = els.fPort.value.trim();
+    var user = els.fUser.value.trim();
+    var pass = els.fPass.value;
+    saveConn(host, port, user, pass);
+    if(client){ client.end(true); client = null; }
+    connect(host, port, user, pass);
+  });
+
+  buildTiles();
+
+  var saved = loadConn();
+  if(saved){
+    els.fHost.value = saved.host || "";
+    els.fPort.value = saved.port || "8884";
+    els.fUser.value = saved.user || "";
+    els.fPass.value = saved.pass || "";
+  } else {
+    els.fPort.value = "8884";
+  }
+
+  freshnessTimer = setInterval(checkFreshness, 5000);
+
+  if(saved && saved.host && saved.user){
+    connect(saved.host, saved.port || "8884", saved.user, saved.pass || "");
+  }
+})();
+</script>
