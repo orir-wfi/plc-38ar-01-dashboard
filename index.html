@@ -310,9 +310,46 @@
 </div>
 </div>
 
-<div id="page-setpoints" class="page" hidden></div>
-<div id="page-active-alarms" class="page" hidden></div>
-<div id="page-alarms-history" class="page" hidden></div>
+<div id="page-setpoints" class="page" hidden>
+<div class="wrap">
+  <section class="panel">
+    <div class="panel-body">
+      <p class="group-title">Setpoints</p>
+      <p class="group-caption">Writes go through the relay's login-gated <span class="mono">dash/cmd</span> channel, ARM+HMAC signed before the PLC accepts them.</p>
+      <label>Setpoint tag: <input id="sp-name" type="text" placeholder="e.g. SP_L11"></label>
+      <label>Value: <input id="sp-value" type="number"></label>
+      <button id="sp-submit" class="primary">Set</button>
+      <span id="sp-result"></span>
+    </div>
+  </section>
+</div>
+</div>
+<div id="page-active-alarms" class="page" hidden>
+<div class="wrap">
+  <section class="panel">
+    <div class="panel-body">
+      <p class="group-title">Active Alarms</p>
+      <p class="group-caption">Live alerts this session, plus stop/resume/fault-clear controls sent via the relay.</p>
+      <div id="active-alarms-list"><!-- populated from the alerts stream already parsed on Overview --></div>
+      <button id="stop-btn">Stop</button>
+      <button id="resume-btn">Resume</button>
+      <button id="clear-fault-btn">Clear Fault</button>
+      <span id="alarm-action-result"></span>
+    </div>
+  </section>
+</div>
+</div>
+<div id="page-alarms-history" class="page" hidden>
+<div class="wrap">
+  <section class="panel">
+    <div class="panel-body">
+      <p class="group-title">Alarms History</p>
+      <p class="note"><em>Shows alerts received since this page was opened, not full history (see plan Task 12 note &mdash; the relay has no HTTP endpoint to query for prior history, per the design's no-inbound-access constraint; a persisted history view would need a new read-only relay-published topic, out of scope here).</em></p>
+      <ul id="alarms-history-list"></ul>
+    </div>
+  </section>
+</div>
+</div>
 
 <script>
 (function(){
@@ -433,6 +470,7 @@
     while(els.alertsList.children.length > 50){
       els.alertsList.removeChild(els.alertsList.lastChild);
     }
+    if(typeof appendToAlarmsHistory === "function"){ appendToAlarmsHistory(message); }
   }
 
   function saveConn(host, port, user, pass){
@@ -608,4 +646,78 @@
     document.getElementById("login-status").textContent = "Saved (verified on first command)";
   });
   document.getElementById("login-input").value = getStoredLogin();
+</script>
+
+<script>
+  // dash-tier MQTT connection: separate from the read-only viewer connection
+  // above. Used for login-gated write commands (setpoint/stop/resume/clear_fault)
+  // sent to the relay over plc/<device>/dash/cmd and answered on dash/status.
+  const dashClient = mqtt.connect("wss://YOUR_HIVEMQ_HOST:8884/mqtt", {
+    username: "DASH_MQTT_USER_PLACEHOLDER", // replaced with the real value once
+                                             // Task 13 creates the credential -
+                                             // do not commit the real value here
+                                             // if this repo is public; see Task 13.
+    password: "DASH_MQTT_PASS_PLACEHOLDER",
+  });
+  const DEVICE_ID = "plc-38ar-01";
+  const DASH_CMD_TOPIC = `plc/${DEVICE_ID}/dash/cmd`;
+  const DASH_STATUS_TOPIC = `plc/${DEVICE_ID}/dash/status`;
+  const pendingRequests = {};
+
+  dashClient.on("connect", () => dashClient.subscribe(DASH_STATUS_TOPIC));
+  dashClient.on("message", (topic, message) => {
+    if (topic !== DASH_STATUS_TOPIC) return;
+    const resp = JSON.parse(message.toString());
+    const handler = pendingRequests[resp.id];
+    if (handler) { handler(resp); delete pendingRequests[resp.id]; }
+  });
+
+  function sendDashCommand(action, extra, onResult) {
+    const id = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    const payload = Object.assign({ id, login: getStoredLogin(), action }, extra || {});
+    pendingRequests[id] = onResult;
+    dashClient.publish(DASH_CMD_TOPIC, JSON.stringify(payload));
+    setTimeout(() => {
+      if (pendingRequests[id]) { pendingRequests[id]({ id, ok: false, error: "timeout" }); delete pendingRequests[id]; }
+    }, 8000); // relay-unreachable case from the spec's Error handling section
+  }
+</script>
+
+<script>
+  document.getElementById("sp-submit").addEventListener("click", () => {
+    const point = document.getElementById("sp-name").value;
+    const value = parseInt(document.getElementById("sp-value").value, 10);
+    document.getElementById("sp-result").textContent = "Sending...";
+    sendDashCommand("setpoint", { point, value }, (resp) => {
+      document.getElementById("sp-result").textContent = resp.ok
+        ? `OK: ${resp.point} = ${resp.value}`
+        : `Failed: ${resp.error}`;
+    });
+  });
+</script>
+
+<script>
+  function wireAlarmAction(buttonId, action) {
+    document.getElementById(buttonId).addEventListener("click", () => {
+      document.getElementById("alarm-action-result").textContent = "Sending...";
+      sendDashCommand(action, {}, (resp) => {
+        document.getElementById("alarm-action-result").textContent = resp.ok
+          ? `OK` : `Failed: ${resp.error}`;
+      });
+    });
+  }
+  wireAlarmAction("stop-btn", "stop");
+  wireAlarmAction("resume-btn", "resume");
+  wireAlarmAction("clear-fault-btn", "clear_fault");
+</script>
+
+<script>
+  // Reuses whatever alert-handling callback the pre-existing Overview code
+  // already has - append each incoming alert here too (wired via the
+  // addAlert() function in the Overview script above).
+  function appendToAlarmsHistory(alertText) {
+    const li = document.createElement("li");
+    li.textContent = alertText;
+    document.getElementById("alarms-history-list").prepend(li);
+  }
 </script>
