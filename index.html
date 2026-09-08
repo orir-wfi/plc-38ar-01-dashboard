@@ -207,6 +207,26 @@
   a{ color:var(--accent); }
 </style>
 
+<style>
+  #dash-nav button.active { font-weight: bold; text-decoration: underline; }
+  .page[hidden] { display: none; }
+  #login-box { margin: 8px 0; }
+</style>
+
+<nav id="dash-nav">
+  <button data-page="overview" class="active">Overview</button>
+  <button data-page="setpoints">Setpoints</button>
+  <button data-page="active-alarms">Active Alarms</button>
+  <button data-page="alarms-history">Alarms History</button>
+</nav>
+
+<div id="login-box">
+  <input id="login-input" type="password" placeholder="Operator login">
+  <button id="login-submit">Log in</button>
+  <span id="login-status"></span>
+</div>
+
+<div id="page-overview" class="page">
 <div class="wrap">
 
   <header class="top">
@@ -288,6 +308,11 @@
 
   <footer class="foot">plc-38ar-01 &middot; viewer dashboard &middot; values reset on page reload, nothing is stored remotely</footer>
 </div>
+</div>
+
+<div id="page-setpoints" class="page" hidden></div>
+<div id="page-active-alarms" class="page" hidden></div>
+<div id="page-alarms-history" class="page" hidden></div>
 
 <script>
 (function(){
@@ -556,4 +581,31 @@
     connect(saved.host, saved.port || "8884", saved.user, saved.pass || "");
   }
 })();
+</script>
+
+<script>
+  const pages = ["overview", "setpoints", "active-alarms", "alarms-history"];
+  document.querySelectorAll("#dash-nav button").forEach(btn => {
+    btn.addEventListener("click", () => {
+      pages.forEach(p => {
+        document.getElementById(`page-${p}`).hidden = (p !== btn.dataset.page);
+      });
+      document.querySelectorAll("#dash-nav button").forEach(b => b.classList.remove("active"));
+      btn.classList.add("active");
+    });
+  });
+
+  const LOGIN_KEY = "ss2_dash_login";
+  function getStoredLogin() {
+    try { return localStorage.getItem(LOGIN_KEY) || ""; } catch (e) { return ""; }
+  }
+  function setStoredLogin(value) {
+    try { localStorage.setItem(LOGIN_KEY, value); } catch (e) {}
+  }
+  document.getElementById("login-submit").addEventListener("click", () => {
+    const value = document.getElementById("login-input").value;
+    setStoredLogin(value);
+    document.getElementById("login-status").textContent = "Saved (verified on first command)";
+  });
+  document.getElementById("login-input").value = getStoredLogin();
 </script>
