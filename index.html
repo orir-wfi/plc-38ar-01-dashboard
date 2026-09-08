@@ -658,6 +658,13 @@
                                              // do not commit the real value here
                                              // if this repo is public; see Task 13.
     password: "DASH_MQTT_PASS_PLACEHOLDER",
+    // Do NOT queue QoS-0 publishes made while disconnected (mqtt.js defaults
+    // this to true). Otherwise a control command clicked while offline is
+    // silently held and delivered minutes later on reconnect - the relay would
+    // sign a fresh ARM window at that later time and the PLC would act on it,
+    // even though the UI already told the operator "Failed: timeout" after 8s.
+    // Dropping the publish is what makes that timeout outcome final.
+    queueQoSZero: false,
   });
   const DEVICE_ID = "plc-38ar-01";
   const DASH_CMD_TOPIC = `plc/${DEVICE_ID}/dash/cmd`;
