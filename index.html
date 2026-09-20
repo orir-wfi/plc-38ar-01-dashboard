@@ -289,6 +289,10 @@
   }
 
   window.sendDashCommand = function(action, extra, onResult){
+    if (!dashClient || !dashClient.connected) {
+      onResult({ id: null, ok: false, error: "dash_not_connected" });
+      return;
+    }
     var id = Date.now() + "-" + Math.random().toString(16).slice(2);
     var payload = Object.assign({ id: id, login: getStoredLogin(), action: action }, extra || {});
     pendingRequests[id] = onResult;
@@ -447,7 +451,10 @@
   if(saved){ els.fHost.value = saved.host || ""; els.fPort.value = saved.port || "8884"; els.fUser.value = saved.user || ""; els.fPass.value = saved.pass || ""; }
   else{ els.fPort.value = "8884"; }
   setInterval(checkFreshness, 5000);
-  if(saved && saved.host && saved.user) connect(saved.host, saved.port || "8884", saved.user, saved.pass || "");
+  if(saved && saved.host && saved.user){
+    connect(saved.host, saved.port || "8884", saved.user, saved.pass || "");
+    if(saved.dashUser) window.__hmiConnectDash(saved.host, saved.port || "8884", saved.dashUser, saved.dashPass || "");
+  }
 
   var pages = ["overview","setpoints","active-alarms","alarms-history","system"];
   document.querySelectorAll("#dash-nav button").forEach(function(btn){
@@ -505,7 +512,7 @@
     readPoints(["SP_L3", "P1_ON", "P2_ON", "P3_ON", "P4_ON", "DP1_ON",
                 "P1_Mode", "P2_Mode", "P3_Mode", "P4_Mode", "DP1_Mode"], function(resp){
       if (!resp.ok) return;
-      if (typeof resp.values.SP_L3 === "number") levelFullScaleCm = resp.values.SP_L3;
+      if (typeof resp.values.SP_L3 === "number" && resp.values.SP_L3 > 0) levelFullScaleCm = resp.values.SP_L3;
       Object.assign(pumpCoilState, resp.values);
       renderPumps();
     });
@@ -552,6 +559,7 @@
   // dash client's own connect is async and there's no single "ready" event
   // exposed to this script.
   var refreshTimer = setInterval(function(){
+    if (document.getElementById("page-overview").hidden) return; // not the visible page - skip this tick
     if (window.__hmiGetDashLogin() === "") return; // nothing to read without a login configured yet
     refreshOverviewReads();
   }, 15000);
@@ -715,6 +723,7 @@
     });
   }
   document.querySelector('#dash-nav button[data-page="system"]').addEventListener("click", refreshSystemReads);
+  document.querySelector('#dash-nav button[data-page="system"]').addEventListener("click", refreshMailReads);
 
   document.getElementById("rebootBtn").addEventListener("click", function(){
     if (!confirm("Reboot the PLC now? This restarts the board immediately.")) return;
@@ -744,9 +753,32 @@
     return pts;
   }
 
+  function mailInputElFor(slotKey){
+    return slotKey === "recipient" ? document.getElementById("mailRecipient") : document.getElementById("mail-input-" + slotKey);
+  }
+
+  // Read-back for all 6 mail slots: reconstructs the ordered 32-register
+  // array each slot's regPrefix+0..regPrefix+31 points to (resp.values is a
+  // {pointName: value} lookup, not already ordered) and unpacks it back to
+  // an email string via the same packString()/unpackString() convention
+  // packEmailToRegisters() uses to write it.
+  function refreshMailReads(){
+    Object.keys(MAIL_SLOTS).forEach(function(slotKey){
+      var slotDef = MAIL_SLOTS[slotKey];
+      readPoints(mailRegPoints(slotDef), function(resp){
+        if (!resp.ok) return;
+        var regs = [];
+        for (var i = 0; i < slotDef.count; i++) regs.push(resp.values[slotDef.regPrefix + i]);
+        var inputEl = mailInputElFor(slotKey);
+        if (inputEl) inputEl.value = HmiLogic.unpackRegistersToEmail(regs);
+      });
+    });
+  }
+
   function setMailSlot(slotKey, inputEl, resultEl){
     var slotDef = MAIL_SLOTS[slotKey];
     var email = inputEl.value.trim();
+    if (!email && !confirm("Clear this recipient? Alerts will no longer be sent to it.")) return;
     var regs;
     try { regs = HmiLogic.packEmailToRegisters(email, slotDef.count); }
     catch (err) { resultEl.textContent = "Too long"; return; }
