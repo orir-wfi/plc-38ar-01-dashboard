@@ -1,312 +1,175 @@
-<title>PLC-38AR-01</title>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SS2 PLC Web HMI</title>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
 <script src="https://cdn.jsdelivr.net/npm/mqtt@5.10.1/dist/mqtt.min.js" integrity="sha384-u4uqeACkFcoKl57rBQJHVGDd1pqhW4w8X3WjTu1ZksPdxoLqdt34jpoNkJisE25W" crossorigin="anonymous"></script>
+<script src="hmi-logic.js"></script>
 <style>
   :root{
-    --bg:#f4f6f7;
-    --surface:#ffffff;
-    --surface-2:#eef2f3;
-    --border:#dbe2e4;
-    --ink:#16232a;
-    --ink-2:#4c626c;
-    --ink-3:#7d939c;
-    --accent:#0e7c86;
-    --accent-ink:#ffffff;
-    --accent-tint:#e2f2f2;
-    --good:#1f8a4c;
-    --warning:#966018;
-    --critical:#c23b3b;
-    --critical-tint:#fbeaea;
-    --focus:#0e7c86;
-    --shadow: 0 1px 2px rgba(22,35,42,.06), 0 6px 20px rgba(22,35,42,.05);
+    --bg:#f4f6f7; --surface:#ffffff; --surface-2:#eef2f3; --border:#dbe2e4;
+    --ink:#16232a; --ink-2:#4c626c; --ink-3:#7d939c;
+    --accent:#0e7c86; --accent-ink:#ffffff; --accent-tint:#e2f2f2;
+    --good:#1f8a4c; --warning:#966018; --critical:#c23b3b; --critical-tint:#fbeaea;
+    --focus:#0e7c86; --shadow: 0 1px 2px rgba(22,35,42,.06), 0 6px 20px rgba(22,35,42,.05);
   }
   @media (prefers-color-scheme: dark){
     :root:not([data-theme="light"]){
-      --bg:#0d1417;
-      --surface:#141d21;
-      --surface-2:#192327;
-      --border:#26343a;
-      --ink:#e7eef0;
-      --ink-2:#a9bcc2;
-      --ink-3:#728990;
-      --accent:#2fb8c4;
-      --accent-ink:#06181a;
-      --accent-tint:#122a2d;
-      --good:#3fbd74;
-      --warning:#e0a53f;
-      --critical:#e2585b;
-      --critical-tint:#2a1516;
-      --focus:#2fb8c4;
-      --shadow: 0 1px 2px rgba(0,0,0,.3), 0 8px 24px rgba(0,0,0,.35);
+      --bg:#0d1417; --surface:#141d21; --surface-2:#192327; --border:#26343a;
+      --ink:#e7eef0; --ink-2:#a9bcc2; --ink-3:#728990;
+      --accent:#2fb8c4; --accent-ink:#06181a; --accent-tint:#122a2d;
+      --good:#3fbd74; --warning:#e0a53f; --critical:#e2585b; --critical-tint:#2a1516;
+      --focus:#2fb8c4; --shadow: 0 1px 2px rgba(0,0,0,.3), 0 8px 24px rgba(0,0,0,.35);
     }
   }
   :root[data-theme="dark"]{
-    --bg:#0d1417;
-    --surface:#141d21;
-    --surface-2:#192327;
-    --border:#26343a;
-    --ink:#e7eef0;
-    --ink-2:#a9bcc2;
-    --ink-3:#728990;
-    --accent:#2fb8c4;
-    --accent-ink:#06181a;
-    --accent-tint:#122a2d;
-    --good:#3fbd74;
-    --warning:#e0a53f;
-    --critical:#e2585b;
-    --critical-tint:#2a1516;
-    --focus:#2fb8c4;
-    --shadow: 0 1px 2px rgba(0,0,0,.3), 0 8px 24px rgba(0,0,0,.35);
+    --bg:#0d1417; --surface:#141d21; --surface-2:#192327; --border:#26343a;
+    --ink:#e7eef0; --ink-2:#a9bcc2; --ink-3:#728990;
+    --accent:#2fb8c4; --accent-ink:#06181a; --accent-tint:#122a2d;
+    --good:#3fbd74; --warning:#e0a53f; --critical:#e2585b; --critical-tint:#2a1516;
+    --focus:#2fb8c4; --shadow: 0 1px 2px rgba(0,0,0,.3), 0 8px 24px rgba(0,0,0,.35);
   }
-
   *{box-sizing:border-box;}
-  body{
-    background:var(--bg);
-    color:var(--ink);
-    font-family:"IBM Plex Sans",system-ui,-apple-system,Segoe UI,sans-serif;
-    font-size:14px;
-    line-height:1.5;
-  }
+  body{ margin:0; background:var(--bg); color:var(--ink); font-family:"IBM Plex Sans",system-ui,sans-serif; font-size:14px; line-height:1.5; }
   .mono{ font-family:"IBM Plex Mono","SF Mono",Consolas,monospace; font-variant-numeric:tabular-nums; }
-  .eyebrow{
-    font-family:"IBM Plex Mono",monospace;
-    font-size:11px;
-    font-weight:500;
-    letter-spacing:.09em;
-    text-transform:uppercase;
-    color:var(--ink-3);
-  }
-
-  .wrap{ max-width:920px; margin:0 auto; padding:28px 20px 56px; }
-
-  header.top{
-    display:flex; align-items:flex-start; justify-content:space-between; gap:16px;
-    flex-wrap:wrap;
-    margin-bottom:22px;
-  }
-  .identity h1{
-    margin:2px 0 0;
-    font-size:22px; font-weight:700; letter-spacing:-.01em;
-    text-wrap:balance;
-    font-family:"IBM Plex Mono",monospace;
-  }
-  .identity .sub{ color:var(--ink-2); font-size:13px; margin-top:4px; }
-
-  .status-block{ text-align:right; display:flex; flex-direction:column; align-items:flex-end; gap:6px; }
-  .pill{
-    display:inline-flex; align-items:center; gap:7px;
-    padding:5px 11px; border-radius:100px;
-    font-size:12.5px; font-weight:600;
-    border:1px solid var(--border);
-    background:var(--surface);
-  }
-  .pill .dot{ width:7px; height:7px; border-radius:50%; background:var(--ink-3); flex:none; }
-  .pill.live{ color:var(--good); border-color:color-mix(in srgb, var(--good) 35%, var(--border)); background:color-mix(in srgb, var(--good) 8%, var(--surface)); }
-  .pill.live .dot{ background:var(--good); box-shadow:0 0 0 3px color-mix(in srgb, var(--good) 22%, transparent); animation:pulse 2.2s ease-in-out infinite; }
-  .pill.stale{ color:var(--warning); border-color:color-mix(in srgb, var(--warning) 35%, var(--border)); background:color-mix(in srgb, var(--warning) 8%, var(--surface)); }
-  .pill.stale .dot{ background:var(--warning); }
-  .pill.down{ color:var(--critical); border-color:color-mix(in srgb, var(--critical) 35%, var(--border)); background:color-mix(in srgb, var(--critical) 8%, var(--surface)); }
-  .pill.down .dot{ background:var(--critical); }
-  .pill.idle{ color:var(--ink-2); }
-  @media (prefers-reduced-motion: reduce){ .pill.live .dot{ animation:none; } }
-  @keyframes pulse{ 0%,100%{ box-shadow:0 0 0 3px color-mix(in srgb, var(--good) 22%, transparent);} 50%{ box-shadow:0 0 0 6px color-mix(in srgb, var(--good) 10%, transparent);} }
-
-  .last-seen{ font-size:12px; color:var(--ink-3); }
-
-  section.panel{
-    background:var(--surface);
-    border:1px solid var(--border);
-    border-radius:14px;
-    box-shadow:var(--shadow);
-    margin-bottom:18px;
-    overflow:hidden;
-  }
-  .panel-head{
-    display:flex; align-items:center; justify-content:space-between; gap:12px;
-    padding:14px 18px;
-    border-bottom:1px solid var(--border);
-    cursor:pointer;
-    user-select:none;
-  }
-  .panel-head h2{ margin:0; font-size:14.5px; font-weight:600; display:flex; align-items:center; gap:8px; }
-  .panel-head .chev{ color:var(--ink-3); font-size:12px; transition:transform .15s ease; }
-  .panel-head .summary{ font-size:12.5px; color:var(--ink-2); font-weight:400; }
+  .wrap{ max-width:960px; margin:0 auto; padding:20px 20px 56px; }
+  nav#dash-nav{ display:flex; gap:4px; padding:10px 20px; background:var(--surface); border-bottom:1px solid var(--border); flex-wrap:wrap; }
+  nav#dash-nav button{ font-family:inherit; font-size:13px; font-weight:600; border:1px solid transparent; background:transparent; color:var(--ink-2); padding:8px 14px; border-radius:8px; cursor:pointer; }
+  nav#dash-nav button:hover{ background:var(--surface-2); }
+  nav#dash-nav button.active{ background:var(--accent-tint); color:var(--accent); }
+  .page[hidden]{ display:none; }
+  section.panel{ background:var(--surface); border:1px solid var(--border); border-radius:14px; box-shadow:var(--shadow); margin-bottom:18px; overflow:hidden; }
+  .panel-head{ display:flex; align-items:center; justify-content:space-between; gap:12px; padding:14px 18px; border-bottom:1px solid var(--border); cursor:pointer; user-select:none; }
+  .panel-head h2{ margin:0; font-size:14.5px; font-weight:600; }
   .panel-body{ padding:16px 18px 18px; }
   .panel.collapsed .panel-body{ display:none; }
-  .panel.collapsed .chev{ transform:rotate(-90deg); }
-
+  .status-block{ display:flex; align-items:center; gap:10px; padding:10px 20px; background:var(--surface); border-bottom:1px solid var(--border); }
+  .pill{ display:inline-flex; align-items:center; gap:7px; padding:5px 11px; border-radius:100px; font-size:12.5px; font-weight:600; border:1px solid var(--border); background:var(--surface); }
+  .pill .dot{ width:7px; height:7px; border-radius:50%; background:var(--ink-3); }
+  .pill.live{ color:var(--good); border-color:color-mix(in srgb, var(--good) 35%, var(--border)); }
+  .pill.live .dot{ background:var(--good); }
+  .pill.stale{ color:var(--warning); }
+  .pill.stale .dot{ background:var(--warning); }
+  .pill.down{ color:var(--critical); }
+  .pill.down .dot{ background:var(--critical); }
   form.conn-form{ display:grid; grid-template-columns:1.6fr .7fr 1fr 1fr auto; gap:10px; align-items:end; }
-  @media (max-width:720px){ form.conn-form{ grid-template-columns:1fr 1fr; } form.conn-form .full{ grid-column:1/-1; } }
+  @media (max-width:720px){ form.conn-form{ grid-template-columns:1fr 1fr; } }
   .field label{ display:block; font-size:12px; color:var(--ink-2); margin-bottom:5px; font-weight:500; }
-  .field input{
-    width:100%;
-    background:var(--surface-2);
-    border:1px solid var(--border);
-    border-radius:8px;
-    padding:8px 10px;
-    color:var(--ink);
-    font-size:13px;
-    font-family:"IBM Plex Mono",monospace;
-  }
-  .field input:focus{ outline:2px solid var(--focus); outline-offset:1px; }
-  button{
-    font-family:inherit; font-size:13px; font-weight:600;
-    border-radius:8px; border:1px solid transparent;
-    padding:9px 16px; cursor:pointer;
-  }
-  button.primary{ background:var(--accent); color:var(--accent-ink); }
-  button.primary:hover{ filter:brightness(1.06); }
+  .field input{ width:100%; background:var(--surface-2); border:1px solid var(--border); border-radius:8px; padding:8px 10px; color:var(--ink); font-size:13px; font-family:"IBM Plex Mono",monospace; }
+  button.primary{ font-family:inherit; font-size:13px; font-weight:600; background:var(--accent); color:var(--accent-ink); border-radius:8px; border:none; padding:9px 16px; cursor:pointer; }
   button.primary:disabled{ opacity:.55; cursor:default; }
-  button.ghost{ background:transparent; border-color:var(--border); color:var(--ink-2); }
-  button.ghost:hover{ background:var(--surface-2); }
-  .note{ margin-top:10px; font-size:12px; color:var(--ink-3); line-height:1.55; }
   .conn-error{ margin-top:10px; font-size:12.5px; color:var(--critical); display:none; }
   .conn-error.show{ display:block; }
-
-  .groups{ display:grid; grid-template-columns:1.05fr .95fr; gap:18px; align-items:start; }
-  @media (max-width:760px){ .groups{ grid-template-columns:1fr; } }
-
-  .group-title{ font-size:13px; font-weight:600; margin:0 0 3px; }
-  .group-caption{ font-size:12px; color:var(--ink-3); margin:0 0 12px; }
-
   .di-grid{ display:grid; grid-template-columns:repeat(2,1fr); gap:8px; }
-  .di-tile{
-    display:flex; align-items:center; gap:9px;
-    border:1px solid var(--border); border-radius:10px;
-    padding:9px 10px;
-    background:var(--surface-2);
-  }
+  .di-tile{ display:flex; align-items:center; gap:9px; border:1px solid var(--border); border-radius:10px; padding:9px 10px; background:var(--surface-2); }
   .di-dot{ width:9px; height:9px; border-radius:50%; background:var(--border); border:1px solid var(--ink-3); flex:none; }
   .di-tile[data-state="1"] .di-dot{ background:var(--accent); border-color:var(--accent); }
-  .di-body{ min-width:0; }
-  .di-name{ font-family:"IBM Plex Mono",monospace; font-size:12px; color:var(--ink); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .di-name{ font-family:"IBM Plex Mono",monospace; font-size:12px; }
   .di-state{ font-size:10.5px; letter-spacing:.05em; color:var(--ink-3); font-weight:600; }
   .di-tile[data-state="1"] .di-state{ color:var(--accent); }
-
-  .ai-grid{ display:flex; flex-direction:column; gap:8px; }
-  .ai-tile{
-    display:flex; align-items:baseline; justify-content:space-between;
-    border:1px solid var(--border); border-radius:10px;
-    padding:12px 14px;
-    background:var(--surface-2);
-  }
-  .ai-name{ font-family:"IBM Plex Mono",monospace; font-size:12.5px; color:var(--ink-2); }
-  .ai-value-wrap{ text-align:right; }
-  .ai-value{ font-family:"IBM Plex Mono",monospace; font-size:24px; font-weight:600; }
-  .ai-unit{ font-size:10.5px; color:var(--ink-3); letter-spacing:.03em; }
-
-  .alerts-list{ display:flex; flex-direction:column; gap:0; max-height:280px; overflow-y:auto; }
+  .alerts-list{ display:flex; flex-direction:column; max-height:280px; overflow-y:auto; }
   .alert-row{ display:flex; gap:12px; padding:9px 0; border-bottom:1px solid var(--border); }
-  .alert-row:last-child{ border-bottom:none; }
-  .alert-time{ font-family:"IBM Plex Mono",monospace; font-size:11.5px; color:var(--ink-3); flex:none; padding-top:1px; }
-  .alert-msg{ font-size:13px; color:var(--ink); }
-  .alerts-empty{ font-size:13px; color:var(--ink-3); padding:6px 0; }
-
-  footer.foot{ margin-top:22px; font-size:11.5px; color:var(--ink-3); text-align:center; }
-  a{ color:var(--accent); }
+  .alert-time{ font-family:"IBM Plex Mono",monospace; font-size:11.5px; color:var(--ink-3); }
 </style>
-
-<style>
-  #dash-nav button.active { font-weight: bold; text-decoration: underline; }
-  .page[hidden] { display: none; }
-  #login-box { margin: 8px 0; }
-</style>
+</head>
+<body>
 
 <nav id="dash-nav">
   <button data-page="overview" class="active">Overview</button>
   <button data-page="setpoints">Setpoints</button>
   <button data-page="active-alarms">Active Alarms</button>
   <button data-page="alarms-history">Alarms History</button>
+  <button data-page="system">System</button>
 </nav>
 
-<div id="login-box">
-  <input id="login-input" type="password" placeholder="Operator login">
-  <button id="login-submit">Log in</button>
-  <span id="login-status"></span>
+<div class="status-block">
+  <span class="pill" id="statusPill"><span class="dot"></span><span id="statusText">Not connected</span></span>
+  <span class="mono" id="lastSeen" style="font-size:12px;color:var(--ink-3)">No telemetry received yet</span>
 </div>
 
 <div id="page-overview" class="page">
 <div class="wrap">
-
-  <header class="top">
-    <div class="identity">
-      <div class="eyebrow">ESP32 PLC 38AR+ &middot; read-only viewer</div>
-      <h1 id="deviceId">plc-38ar-01</h1>
-      <div class="sub">Digital &amp; analog inputs, live over MQTT &middot; telemetry publishes on a 60s cycle</div>
-    </div>
-    <div class="status-block">
-      <span class="pill idle" id="statusPill"><span class="dot"></span><span id="statusText">Not connected</span></span>
-      <span class="last-seen" id="lastSeen">No telemetry received yet</span>
-    </div>
-  </header>
-
   <section class="panel" id="connPanel">
     <div class="panel-head" id="connPanelHead">
-      <h2>Broker connection <span class="summary" id="connSummary"></span></h2>
-      <span class="chev">&#9660;</span>
+      <h2>Broker connection <span id="connSummary" style="font-weight:400;color:var(--ink-2)"></span></h2>
     </div>
     <div class="panel-body">
       <form class="conn-form" id="connForm">
-        <div class="field full" style="grid-column:1/2;">
-          <label for="fHost">Broker host</label>
-          <input id="fHost" type="text" placeholder="xxxxxxxx.s1.eu.hivemq.cloud" autocomplete="off" spellcheck="false">
-        </div>
-        <div class="field">
-          <label for="fPort">WSS port</label>
-          <input id="fPort" type="text" placeholder="8884" autocomplete="off">
-        </div>
-        <div class="field">
-          <label for="fUser">Viewer username</label>
-          <input id="fUser" type="text" autocomplete="off" spellcheck="false">
-        </div>
-        <div class="field">
-          <label for="fPass">Viewer password</label>
-          <input id="fPass" type="password" autocomplete="off">
-        </div>
-        <div>
-          <button type="submit" class="primary" id="connectBtn">Connect</button>
-        </div>
+        <div class="field"><label for="fHost">Broker host</label><input id="fHost" type="text" placeholder="xxxxxxxx.s1.eu.hivemq.cloud"></div>
+        <div class="field"><label for="fPort">WSS port</label><input id="fPort" type="text" placeholder="8884"></div>
+        <div class="field"><label for="fUser">Viewer username</label><input id="fUser" type="text"></div>
+        <div class="field"><label for="fPass">Viewer password</label><input id="fPass" type="password"></div>
+        <div><button type="submit" class="primary" id="connectBtn">Connect</button></div>
       </form>
       <div class="conn-error" id="connError"></div>
-      <p class="note">
-        Uses the <strong>viewer-tier</strong> MQTT credential &mdash; broker-enforced subscribe-only on
-        <span class="mono">plc/plc-38ar-01/+</span>, no write access, no HMAC key involved. Credentials are kept only in
-        this browser's local storage and sent directly to your broker over TLS (WSS); nothing passes through Claude.
-        Use <a href="#" id="disconnectLink">disconnect</a> to clear the connection.
-      </p>
+      <div class="field" style="margin-top:12px;max-width:320px">
+        <label for="dashUser">Dash username (for writes)</label>
+        <input id="dashUser" type="text" autocomplete="off">
+      </div>
+      <div class="field" style="max-width:320px">
+        <label for="dashPass">Dash password</label>
+        <input id="dashPass" type="password" autocomplete="off">
+      </div>
+      <div class="field" style="max-width:320px">
+        <label for="dashLogin">Operator login (for writes)</label>
+        <input id="dashLogin" type="password" autocomplete="off">
+      </div>
     </div>
   </section>
-
-  <div class="groups">
-    <section class="panel">
-      <div class="panel-body">
-        <p class="group-title">Digital inputs</p>
-        <p class="group-caption">Raw contact state &middot; shown as reported, polarity not interpreted here</p>
-        <div class="di-grid" id="diGrid"></div>
-      </div>
-    </section>
-
-    <section class="panel">
-      <div class="panel-body">
-        <p class="group-title">Analog inputs</p>
-        <p class="group-caption">Raw 11-bit ADC counts, 0&ndash;2047 &middot; no engineering-unit scaling applied</p>
-        <div class="ai-grid" id="aiGrid"></div>
-      </div>
-    </section>
-  </div>
 
   <section class="panel">
     <div class="panel-body">
-      <p class="group-title">Alerts</p>
-      <p class="group-caption">Messages published by the PLC on <span class="mono">plc/plc-38ar-01/alerts</span> this session</p>
-      <div class="alerts-list" id="alertsList">
-        <div class="alerts-empty" id="alertsEmpty">No alerts received yet this session.</div>
-      </div>
+      <p style="font-weight:600;margin:0 0 12px">System overview</p>
+      <div id="mimicStatusBadge" style="margin-bottom:10px;font-size:13px"></div>
+      <svg id="mimicSvg" viewBox="0 0 600 320" style="width:100%;height:auto;max-width:600px" role="img" aria-label="Pilot skid schematic">
+        <!-- Sugar tank (small, center) -->
+        <rect x="255" y="180" width="90" height="80" rx="6" fill="var(--surface-2)" stroke="var(--border)"/>
+        <text x="300" y="270" text-anchor="middle" font-size="11" fill="var(--ink-2)">Sugar tank</text>
+        <circle id="mimicLS0Dot" cx="300" cy="220" r="8" fill="var(--border)"/>
+        <text id="mimicLS0Label" x="300" y="225" text-anchor="middle" font-size="9" fill="var(--ink)"></text>
+
+        <!-- TAYA 2 (left, per the PDF's own labeling) -->
+        <rect x="60" y="60" width="120" height="200" rx="6" fill="var(--surface-2)" stroke="var(--border)"/>
+        <rect id="mimicLT02Bar" x="66" y="256" width="108" height="0" fill="var(--accent)" opacity="0.35"/>
+        <text x="120" y="45" text-anchor="middle" font-size="12" font-weight="600" fill="var(--ink)">TAYA 2</text>
+        <text id="mimicLT02Value" x="120" y="160" text-anchor="middle" font-size="14" class="mono" fill="var(--ink)"></text>
+
+        <!-- TAYA 1 (right, per the PDF's own labeling) -->
+        <rect x="420" y="60" width="120" height="200" rx="6" fill="var(--surface-2)" stroke="var(--border)"/>
+        <rect id="mimicLT01Bar" x="426" y="256" width="108" height="0" fill="var(--accent)" opacity="0.35"/>
+        <text x="480" y="45" text-anchor="middle" font-size="12" font-weight="600" fill="var(--ink)">TAYA 1</text>
+        <text id="mimicLT01Value" x="480" y="160" text-anchor="middle" font-size="14" class="mono" fill="var(--ink)"></text>
+
+        <!-- Pumps: P1 (TAYA1 circ), P2 (TAYA2 circ), P3 (sugar mix), P4 (inlet), DP1 (dosing) -->
+        <g id="mimicPumpP1"><circle cx="480" cy="285" r="12" fill="var(--border)"/><text x="480" y="289" text-anchor="middle" font-size="9" fill="var(--ink)">P1</text></g>
+        <g id="mimicPumpP2"><circle cx="120" cy="285" r="12" fill="var(--border)"/><text x="120" y="289" text-anchor="middle" font-size="9" fill="var(--ink)">P2</text></g>
+        <g id="mimicPumpP3"><circle cx="255" cy="300" r="12" fill="var(--border)"/><text x="255" y="304" text-anchor="middle" font-size="9" fill="var(--ink)">P3</text></g>
+        <g id="mimicPumpP4"><circle cx="30" cy="300" r="12" fill="var(--border)"/><text x="30" y="304" text-anchor="middle" font-size="9" fill="var(--ink)">P4</text></g>
+        <g id="mimicPumpDP1"><circle cx="345" cy="300" r="12" fill="var(--border)"/><text x="345" y="304" text-anchor="middle" font-size="8" fill="var(--ink)">DP1</text></g>
+
+        <text id="mimicFlow" x="30" y="315" text-anchor="middle" font-size="9" class="mono" fill="var(--ink-2)"></text>
+        <text id="mimicNO3" x="345" y="315" text-anchor="middle" font-size="9" class="mono" fill="var(--ink-2)"></text>
+      </svg>
+      <div id="mimicManualControls" style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap"></div>
     </div>
   </section>
 
-  <footer class="foot">plc-38ar-01 &middot; viewer dashboard &middot; values reset on page reload, nothing is stored remotely</footer>
+  <section class="panel">
+    <div class="panel-body">
+      <p style="font-weight:600;margin:0 0 8px">Daily counters</p>
+      <div id="countersStrip" class="mono" style="display:flex;gap:20px;flex-wrap:wrap;font-size:13px"></div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-body">
+      <p style="font-weight:600;margin:0 0 8px">Alerts</p>
+      <div class="alerts-list" id="alertsList"><div id="alertsEmpty" style="color:var(--ink-3)">No alerts received yet this session.</div></div>
+    </div>
+  </section>
 </div>
 </div>
 
@@ -314,27 +177,24 @@
 <div class="wrap">
   <section class="panel">
     <div class="panel-body">
-      <p class="group-title">Setpoints</p>
-      <p class="group-caption">Writes go through the relay's login-gated <span class="mono">dash/cmd</span> channel, ARM+HMAC signed before the PLC accepts them.</p>
-      <label>Setpoint tag: <input id="sp-name" type="text" placeholder="e.g. SP_L11"></label>
-      <label>Value: <input id="sp-value" type="number"></label>
-      <button id="sp-submit" class="primary">Set</button>
-      <span id="sp-result"></span>
+      <button class="primary" id="spRefreshBtn">Refresh current values</button>
+      <span id="spRefreshStatus" style="margin-left:10px;font-size:12px;color:var(--ink-3)"></span>
     </div>
   </section>
+  <div id="spGroups"></div>
 </div>
 </div>
 <div id="page-active-alarms" class="page" hidden>
 <div class="wrap">
   <section class="panel">
     <div class="panel-body">
-      <p class="group-title">Active Alarms</p>
-      <p class="group-caption">Live alerts this session, plus stop/resume/fault-clear controls sent via the relay.</p>
-      <div id="active-alarms-list"><!-- populated from the alerts stream already parsed on Overview --></div>
-      <button id="stop-btn">Stop</button>
-      <button id="resume-btn">Resume</button>
-      <button id="clear-fault-btn">Clear Fault</button>
-      <span id="alarm-action-result"></span>
+      <div style="display:flex;gap:8px;margin-bottom:14px">
+        <button class="primary" id="stop-btn">Stop</button>
+        <button class="primary" id="resume-btn">Resume</button>
+        <button class="primary" id="clear-fault-btn">Clear Fault</button>
+        <span id="alarm-action-result" style="align-self:center;font-size:12px"></span>
+      </div>
+      <div id="active-alarms-list"><p style="color:var(--ink-3)">No active alarms.</p></div>
     </div>
   </section>
 </div>
@@ -343,9 +203,55 @@
 <div class="wrap">
   <section class="panel">
     <div class="panel-body">
-      <p class="group-title">Alarms History</p>
-      <p class="note"><em>Shows alerts received since this page was opened, not full history (see plan Task 12 note &mdash; the relay has no HTTP endpoint to query for prior history, per the design's no-inbound-access constraint; a persisted history view would need a new read-only relay-published topic, out of scope here).</em></p>
-      <ul id="alarms-history-list"></ul>
+      <p class="note" style="color:var(--ink-3);font-size:12px">Session-only — resets on page reload. The relay has no inbound endpoint to query persisted history.</p>
+      <ul id="alarms-history-list" style="padding-left:18px"></ul>
+    </div>
+  </section>
+</div>
+</div>
+<div id="page-system" class="page" hidden>
+<div class="wrap">
+  <section class="panel">
+    <div class="panel-body">
+      <p style="font-weight:600;margin:0 0 8px">Transport status</p>
+      <div id="transportStatus" class="mono" style="font-size:13px"></div>
+      <p style="font-weight:600;margin:14px 0 4px">Transport toggles</p>
+      <p class="note" style="color:var(--warning);font-size:12px;margin:0 0 10px">
+        Disabling every transport (or the one currently connected with no working
+        alternative) strands the device until power-cycled. Toggle one at a time and
+        confirm the device is still reachable before touching another.
+      </p>
+      <div id="transportToggles" style="display:flex;gap:16px;flex-wrap:wrap"></div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-body">
+      <p style="font-weight:600;margin:0 0 8px">Dosing mode</p>
+      <div id="dosingModeControl"></div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-body">
+      <p style="font-weight:600;margin:0 0 8px">Reboot</p>
+      <button class="primary" id="rebootBtn">Reboot PLC</button>
+      <span id="rebootResult" style="margin-left:10px;font-size:12px"></span>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-body">
+      <p style="font-weight:600;margin:0 0 8px">Email</p>
+      <div style="display:flex;gap:10px;align-items:center;margin-bottom:10px">
+        <label for="mailRecipient" style="font-size:13px;min-width:160px">Daily digest recipient</label>
+        <input id="mailRecipient" type="email" style="flex:1;max-width:300px">
+        <button class="primary" data-mail-slot="recipient">Set</button>
+        <span id="mailResult-recipient" style="font-size:12px"></span>
+      </div>
+      <div id="mailAlertSlots"></div>
+      <button class="primary" id="sendDailyEmailNowBtn" style="margin-top:10px">Send Daily Email Now</button>
+      <span id="sendDailyEmailResult" style="margin-left:10px;font-size:12px"></span>
     </div>
   </section>
 </div>
@@ -354,18 +260,65 @@
 <script>
 (function(){
   var DEVICE_ID = "plc-38ar-01";
+  var DASH_CMD_TOPIC = "plc/" + DEVICE_ID + "/dash/cmd";
+  var DASH_STATUS_TOPIC = "plc/" + DEVICE_ID + "/dash/status";
+  var LOGIN_KEY = "ss2_hmi_dash_login";
+  var DASH_STORE_KEY = "plchmi.plc-38ar-01.dashconn";
+
+  function getStoredLogin(){ try{ return localStorage.getItem(LOGIN_KEY) || ""; }catch(e){ return ""; } }
+  function setStoredLogin(v){ try{ localStorage.setItem(LOGIN_KEY, v); }catch(e){} }
+
+  var dashClient = null;
+  var pendingRequests = {};
+
+  function connectDash(host, port, dashUser, dashPass){
+    dashClient = mqtt.connect("wss://" + host + ":" + (port || "8884") + "/mqtt", {
+      username: dashUser,
+      password: dashPass,
+      clientId: "hmidash-" + Math.random().toString(16).slice(2, 10),
+      queueQoSZero: false, // dropping a publish made while offline is correct here - see the original dashboard's comment on this exact setting
+    });
+    dashClient.on("connect", function(){ dashClient.subscribe(DASH_STATUS_TOPIC); });
+    dashClient.on("message", function(topic, message){
+      if (topic !== DASH_STATUS_TOPIC) return;
+      var resp;
+      try { resp = JSON.parse(message.toString()); } catch(e) { return; }
+      var handler = pendingRequests[resp.id];
+      if (handler) { handler(resp); delete pendingRequests[resp.id]; }
+    });
+  }
+
+  window.sendDashCommand = function(action, extra, onResult){
+    var id = Date.now() + "-" + Math.random().toString(16).slice(2);
+    var payload = Object.assign({ id: id, login: getStoredLogin(), action: action }, extra || {});
+    pendingRequests[id] = onResult;
+    dashClient.publish(DASH_CMD_TOPIC, JSON.stringify(payload));
+    setTimeout(function(){
+      if (pendingRequests[id]) { pendingRequests[id]({ id: id, ok: false, error: "timeout" }); delete pendingRequests[id]; }
+    }, 8000);
+  };
+
+  window.readPoints = function(points, onResult){
+    window.sendDashCommand("read", { points: points }, onResult);
+  };
+
+  window.__hmiSetDashLogin = setStoredLogin;
+  window.__hmiGetDashLogin = getStoredLogin;
+  window.__hmiConnectDash = connectDash;
+})();
+</script>
+<script>
+(function(){
+  var DEVICE_ID = "plc-38ar-01";
   var TOPIC_TELEMETRY = "plc/" + DEVICE_ID + "/telemetry";
   var TOPIC_ALERTS = "plc/" + DEVICE_ID + "/alerts";
-  var STALE_MS = 90000; // 90s: 1.5x the firmware's 60s publish interval
-
+  var STALE_MS = 90000;
   var DIGITAL_TAGS = ["System_Switch","Reset_Inactive_Alarms","Q_Stop","P1_OL","P2_OL","P3_OL","P4_OL","P5_OL","FT101_P","LS0_low"];
-  var ANALOG_TAGS = ["LT01","LT02","AIT01_NO3"];
-
-  var STORE_KEY = "plcmon.plc-38ar-01.conn";
+  var STORE_KEY = "plchmi.plc-38ar-01.conn";
 
   var client = null;
   var lastSeenAt = null;
-  var freshnessTimer = null;
+  window.__hmiLastTelemetry = null; // read by later tasks (Overview mimic, System page)
 
   var els = {
     statusPill: document.getElementById("statusPill"),
@@ -381,350 +334,468 @@
     fPort: document.getElementById("fPort"),
     fUser: document.getElementById("fUser"),
     fPass: document.getElementById("fPass"),
-    disconnectLink: document.getElementById("disconnectLink"),
     diGrid: document.getElementById("diGrid"),
-    aiGrid: document.getElementById("aiGrid"),
     alertsList: document.getElementById("alertsList"),
     alertsEmpty: document.getElementById("alertsEmpty")
   };
 
   function buildTiles(){
+    if(!els.diGrid) return; // Task 14 replaced the DI-grid panel with the mimic diagram
     DIGITAL_TAGS.forEach(function(tag){
       var tile = document.createElement("div");
       tile.className = "di-tile";
-      tile.dataset.state = "";
       tile.id = "di-" + tag;
-      tile.innerHTML = '<span class="di-dot"></span><span class="di-body"><div class="di-name">' + tag +
-        '</div><div class="di-state">&mdash;</div></span>';
+      tile.innerHTML = '<span class="di-dot"></span><span><div class="di-name">' + tag + '</div><div class="di-state">&mdash;</div></span>';
       els.diGrid.appendChild(tile);
     });
-    ANALOG_TAGS.forEach(function(tag){
-      var tile = document.createElement("div");
-      tile.className = "ai-tile";
-      tile.id = "ai-" + tag;
-      tile.innerHTML = '<span class="ai-name">' + tag + '</span><span class="ai-value-wrap">' +
-        '<div class="ai-value">&mdash;</div><div class="ai-unit">raw ADC</div></span>';
-      els.aiGrid.appendChild(tile);
-    });
   }
 
-  function setStatus(kind, text){
-    els.statusPill.className = "pill " + kind;
-    els.statusText.textContent = text;
-  }
-
-  function updateLastSeenLabel(){
-    if(!lastSeenAt){
-      els.lastSeen.textContent = "No telemetry received yet";
-      return;
-    }
-    var secs = Math.round((Date.now() - lastSeenAt) / 1000);
-    els.lastSeen.textContent = "Last telemetry " + secs + "s ago";
-  }
+  function setStatus(kind, text){ els.statusPill.className = "pill " + kind; els.statusText.textContent = text; }
 
   function checkFreshness(){
-    updateLastSeenLabel();
+    if(!lastSeenAt){ els.lastSeen.textContent = "No telemetry received yet"; return; }
+    var secs = Math.round((Date.now() - lastSeenAt) / 1000);
+    els.lastSeen.textContent = "Last telemetry " + secs + "s ago";
     if(!client || !client.connected) return;
-    if(!lastSeenAt){
-      setStatus("idle", "Connected — waiting for first telemetry");
-      return;
-    }
-    var age = Date.now() - lastSeenAt;
-    if(age > STALE_MS){
-      setStatus("stale", "Connected — telemetry stale");
-    } else {
-      setStatus("live", "Live");
-    }
+    setStatus(secs * 1000 > STALE_MS ? "stale" : "live", secs * 1000 > STALE_MS ? "Connected — telemetry stale" : "Live");
   }
 
   function applyTelemetry(json){
     lastSeenAt = Date.now();
+    window.__hmiLastTelemetry = json;
     DIGITAL_TAGS.forEach(function(tag){
       if(!(tag in json)) return;
-      var val = json[tag];
       var tile = document.getElementById("di-" + tag);
       if(!tile) return;
-      tile.dataset.state = String(val);
-      tile.querySelector(".di-state").textContent = val ? "ON" : "OFF";
+      tile.dataset.state = String(json[tag]);
+      tile.querySelector(".di-state").textContent = json[tag] ? "ON" : "OFF";
     });
-    ANALOG_TAGS.forEach(function(tag){
-      if(!(tag in json)) return;
-      var tile = document.getElementById("ai-" + tag);
-      if(!tile) return;
-      tile.querySelector(".ai-value").textContent = json[tag];
-    });
+    document.dispatchEvent(new CustomEvent("hmi:telemetry", { detail: json }));
     checkFreshness();
   }
 
   function addAlert(message){
-    if(els.alertsEmpty) { els.alertsEmpty.remove(); els.alertsEmpty = null; }
+    if(els.alertsEmpty){ els.alertsEmpty.remove(); els.alertsEmpty = null; }
     var row = document.createElement("div");
     row.className = "alert-row";
     var t = new Date();
-    var hh = String(t.getHours()).padStart(2,"0");
-    var mm = String(t.getMinutes()).padStart(2,"0");
-    var ss = String(t.getSeconds()).padStart(2,"0");
-    row.innerHTML = '<span class="alert-time">' + hh + ":" + mm + ":" + ss + '</span><span class="alert-msg"></span>';
-    row.querySelector(".alert-msg").textContent = message;
+    row.innerHTML = '<span class="alert-time mono">' + t.toTimeString().slice(0,8) + '</span><span></span>';
+    row.lastElementChild.textContent = message;
     els.alertsList.insertBefore(row, els.alertsList.firstChild);
-    while(els.alertsList.children.length > 50){
-      els.alertsList.removeChild(els.alertsList.lastChild);
-    }
-    if(typeof appendToAlarmsHistory === "function"){ appendToAlarmsHistory(message); }
+    while(els.alertsList.children.length > 50) els.alertsList.removeChild(els.alertsList.lastChild);
+    document.dispatchEvent(new CustomEvent("hmi:alert", { detail: message }));
   }
 
-  function saveConn(host, port, user, pass){
-    try{
-      localStorage.setItem(STORE_KEY, JSON.stringify({host:host, port:port, user:user, pass:pass}));
-    }catch(e){}
-  }
-  function loadConn(){
-    try{
-      var raw = localStorage.getItem(STORE_KEY);
-      return raw ? JSON.parse(raw) : null;
-    }catch(e){ return null; }
-  }
-  function clearConn(){
-    try{ localStorage.removeItem(STORE_KEY); }catch(e){}
-  }
-
-  function collapseConnPanel(hostLabel){
-    els.connPanel.classList.add("collapsed");
-    els.connSummary.textContent = "— " + hostLabel;
-  }
-  function expandConnPanel(){
-    els.connPanel.classList.remove("collapsed");
-    els.connSummary.textContent = "";
-  }
-
-  els.connPanelHead.addEventListener("click", function(){
-    els.connPanel.classList.toggle("collapsed");
-  });
-
-  function doDisconnect(){
-    if(client){
-      client.end(true);
-      client = null;
-    }
-    lastSeenAt = null;
-    setStatus("idle", "Not connected");
-    els.lastSeen.textContent = "No telemetry received yet";
-    els.connectBtn.disabled = false;
-    els.connectBtn.textContent = "Connect";
-    expandConnPanel();
-  }
-
-  els.disconnectLink.addEventListener("click", function(e){
-    e.preventDefault();
-    clearConn();
-    doDisconnect();
-  });
+  function saveConn(host, port, user, pass, dashUser, dashPass){ try{ localStorage.setItem(STORE_KEY, JSON.stringify({host,port,user,pass,dashUser,dashPass})); }catch(e){} }
+  function loadConn(){ try{ var r = localStorage.getItem(STORE_KEY); return r ? JSON.parse(r) : null; }catch(e){ return null; } }
 
   function connect(host, port, user, pass){
     els.connError.classList.remove("show");
-    if(!host){
-      els.connError.textContent = "Enter the broker host first.";
-      els.connError.classList.add("show");
-      return;
-    }
+    if(!host){ els.connError.textContent = "Enter the broker host first."; els.connError.classList.add("show"); return; }
     port = port || "8884";
-    els.connectBtn.disabled = true;
-    els.connectBtn.textContent = "Connecting…";
+    els.connectBtn.disabled = true; els.connectBtn.textContent = "Connecting…";
     setStatus("idle", "Connecting…");
-
     var url = "wss://" + host + ":" + port + "/mqtt";
     try{
-      client = mqtt.connect(url, {
-        username: user,
-        password: pass,
-        clientId: "plcmon-" + Math.random().toString(16).slice(2, 10),
-        reconnectPeriod: 4000,
-        connectTimeout: 8000,
-        clean: true
-      });
+      client = mqtt.connect(url, { username: user, password: pass, clientId: "plchmi-" + Math.random().toString(16).slice(2,10), reconnectPeriod: 4000, connectTimeout: 8000, clean: true });
     } catch(err){
       els.connError.textContent = "Could not open connection: " + err.message;
-      els.connError.classList.add("show");
-      els.connectBtn.disabled = false;
-      els.connectBtn.textContent = "Connect";
-      setStatus("down", "Connection failed");
-      return;
+      els.connError.classList.add("show"); els.connectBtn.disabled = false; els.connectBtn.textContent = "Connect";
+      setStatus("down", "Connection failed"); return;
     }
-
     client.on("connect", function(){
-      els.connectBtn.disabled = false;
-      els.connectBtn.textContent = "Reconnect";
+      els.connectBtn.disabled = false; els.connectBtn.textContent = "Reconnect";
       setStatus("idle", "Connected — waiting for first telemetry");
-      collapseConnPanel(host);
+      els.connPanel.classList.add("collapsed"); els.connSummary.textContent = "— " + host;
       client.subscribe([TOPIC_TELEMETRY, TOPIC_ALERTS], function(err){
-        if(err){
-          els.connError.textContent = "Connected, but subscribe failed: " + err.message + " (check the viewer credential's broker permission).";
-          els.connError.classList.add("show");
-        }
+        if(err){ els.connError.textContent = "Connected, but subscribe failed: " + err.message; els.connError.classList.add("show"); }
       });
     });
-
     client.on("message", function(topic, payload){
       var text = payload.toString();
-      if(topic === TOPIC_TELEMETRY){
-        try{ applyTelemetry(JSON.parse(text)); }catch(e){}
-      } else if(topic === TOPIC_ALERTS){
-        addAlert(text);
-      }
+      if(topic === TOPIC_TELEMETRY){ try{ applyTelemetry(JSON.parse(text)); }catch(e){} }
+      else if(topic === TOPIC_ALERTS){ addAlert(text); }
     });
-
-    client.on("reconnect", function(){
-      setStatus("stale", "Reconnecting…");
-    });
-
-    client.on("close", function(){
-      if (els.statusText.textContent !== "Not connected") setStatus("down", "Disconnected");
-    });
-
+    client.on("reconnect", function(){ setStatus("stale", "Reconnecting…"); });
+    client.on("close", function(){ if(els.statusText.textContent !== "Not connected") setStatus("down", "Disconnected"); });
     client.on("error", function(err){
       els.connError.textContent = "Broker error: " + (err && err.message ? err.message : String(err));
-      els.connError.classList.add("show");
-      setStatus("down", "Connection error");
-      els.connectBtn.disabled = false;
-      els.connectBtn.textContent = "Connect";
+      els.connError.classList.add("show"); setStatus("down", "Connection error");
+      els.connectBtn.disabled = false; els.connectBtn.textContent = "Connect";
     });
   }
 
   els.connForm.addEventListener("submit", function(e){
     e.preventDefault();
-    var host = els.fHost.value.trim();
-    var port = els.fPort.value.trim();
-    var user = els.fUser.value.trim();
-    var pass = els.fPass.value;
-    saveConn(host, port, user, pass);
+    var host = els.fHost.value.trim(), port = els.fPort.value.trim(), user = els.fUser.value.trim(), pass = els.fPass.value;
+    var dashUser = document.getElementById("dashUser").value.trim(), dashPass = document.getElementById("dashPass").value;
+    saveConn(host, port, user, pass, dashUser, dashPass);
     if(client){ client.end(true); client = null; }
     connect(host, port, user, pass);
+    window.__hmiConnectDash(host, port, dashUser, dashPass);
   });
 
   buildTiles();
-
+  ["dashUser", "dashPass"].forEach(function(id){
+    var saved = loadConn() || {};
+    var key = id === "dashUser" ? "dashUser" : "dashPass";
+    document.getElementById(id).value = saved[key] || "";
+  });
+  document.getElementById("dashLogin").value = window.__hmiGetDashLogin();
+  document.getElementById("dashLogin").addEventListener("change", function(e){ window.__hmiSetDashLogin(e.target.value); });
   var saved = loadConn();
-  if(saved){
-    els.fHost.value = saved.host || "";
-    els.fPort.value = saved.port || "8884";
-    els.fUser.value = saved.user || "";
-    els.fPass.value = saved.pass || "";
-  } else {
-    els.fPort.value = "8884";
+  if(saved){ els.fHost.value = saved.host || ""; els.fPort.value = saved.port || "8884"; els.fUser.value = saved.user || ""; els.fPass.value = saved.pass || ""; }
+  else{ els.fPort.value = "8884"; }
+  setInterval(checkFreshness, 5000);
+  if(saved && saved.host && saved.user) connect(saved.host, saved.port || "8884", saved.user, saved.pass || "");
+
+  var pages = ["overview","setpoints","active-alarms","alarms-history","system"];
+  document.querySelectorAll("#dash-nav button").forEach(function(btn){
+    btn.addEventListener("click", function(){
+      pages.forEach(function(p){ document.getElementById("page-" + p).hidden = (p !== btn.dataset.page); });
+      document.querySelectorAll("#dash-nav button").forEach(function(b){ b.classList.remove("active"); });
+      btn.classList.add("active");
+    });
+  });
+})();
+</script>
+<script>
+(function(){
+  var levelFullScaleCm = 160; // SP_L3 default; overwritten once the bulk read below returns
+  var pumpCoilState = {}; // e.g. {P1_ON: 0, P1_Mode: 1, ...} - from the bulk read below
+
+  function setBar(id, valueCm){
+    var el = document.getElementById(id);
+    var h = Math.max(0, Math.min(200, (valueCm / levelFullScaleCm) * 200));
+    el.setAttribute("y", 256 - h);
+    el.setAttribute("height", h);
   }
 
-  freshnessTimer = setInterval(checkFreshness, 5000);
-
-  if(saved && saved.host && saved.user){
-    connect(saved.host, saved.port || "8884", saved.user, saved.pass || "");
+  function renderPump(tag, onCoil, modeCoil){
+    var g = document.getElementById("mimicPump" + tag);
+    var circle = g.querySelector("circle");
+    var on = pumpCoilState[onCoil] === 1;
+    var isAuto = pumpCoilState[modeCoil] !== 0; // default Auto-looking until the real value arrives
+    circle.setAttribute("fill", on ? "var(--good)" : "var(--border)");
+    var existingBtn = document.getElementById("mimicBtn" + tag);
+    if (existingBtn) existingBtn.remove();
+    if (!isAuto) {
+      var btn = document.createElement("button");
+      btn.id = "mimicBtn" + tag;
+      btn.className = "primary";
+      btn.textContent = tag + (on ? " OFF" : " ON");
+      btn.addEventListener("click", function(){
+        sendDashCommand("coil", { point: onCoil, value: on ? 0 : 1 }, function(resp){
+          if (resp.ok) { pumpCoilState[onCoil] = on ? 0 : 1; renderPump(tag, onCoil, modeCoil); }
+        });
+      });
+      document.getElementById("mimicManualControls").appendChild(btn);
+    }
   }
+
+  function renderPumps(){
+    renderPump("P1", "P1_ON", "P1_Mode");
+    renderPump("P2", "P2_ON", "P2_Mode");
+    renderPump("P3", "P3_ON", "P3_Mode");
+    renderPump("P4", "P4_ON", "P4_Mode");
+    renderPump("DP1", "DP1_ON", "DP1_Mode");
+  }
+
+  function refreshOverviewReads(){
+    readPoints(["SP_L3", "P1_ON", "P2_ON", "P3_ON", "P4_ON", "DP1_ON",
+                "P1_Mode", "P2_Mode", "P3_Mode", "P4_Mode", "DP1_Mode"], function(resp){
+      if (!resp.ok) return;
+      if (typeof resp.values.SP_L3 === "number") levelFullScaleCm = resp.values.SP_L3;
+      Object.assign(pumpCoilState, resp.values);
+      renderPumps();
+    });
+  }
+
+  document.addEventListener("hmi:telemetry", function(e){
+    var t = e.detail;
+    if ("LT01" in t) {
+      var lt01 = HmiLogic.scaleTelemetryValue("LT01", t.LT01);
+      setBar("mimicLT01Bar", lt01);
+      document.getElementById("mimicLT01Value").textContent = lt01 + " cm";
+    }
+    if ("LT02" in t) {
+      var lt02 = HmiLogic.scaleTelemetryValue("LT02", t.LT02);
+      setBar("mimicLT02Bar", lt02);
+      document.getElementById("mimicLT02Value").textContent = lt02 + " cm";
+    }
+    if ("LS0_low" in t) {
+      var normal = t.LS0_low === 1; // active-low: 1 = normal, 0 = low
+      document.getElementById("mimicLS0Dot").setAttribute("fill", normal ? "var(--good)" : "var(--critical)");
+      document.getElementById("mimicLS0Label").textContent = normal ? "OK" : "LOW";
+    }
+    if ("FT101_accumulated" in t) {
+      document.getElementById("mimicFlow").textContent = HmiLogic.scaleTelemetryValue("FT101_accumulated", t.FT101_accumulated).toFixed(2) + " m3/hr";
+    }
+    if ("AIT01_NO3" in t) {
+      document.getElementById("mimicNO3").textContent = HmiLogic.scaleTelemetryValue("AIT01_NO3", t.AIT01_NO3).toFixed(1) + " ppm";
+    }
+    var badge = document.getElementById("mimicStatusBadge");
+    var faultCount = t.ActiveFaultCount || 0;
+    var systemOn = t.System_Switch === 1;
+    badge.innerHTML = '<span class="pill ' + (faultCount > 0 ? "down" : (systemOn ? "live" : "")) + '"><span class="dot"></span>' +
+      (systemOn ? "System ON" : "System OFF") + (faultCount > 0 ? " — " + faultCount + " active fault(s)" : "") + '</span>';
+
+    var strip = document.getElementById("countersStrip");
+    strip.innerHTML = ["C_10","C_11","C_12","C_13","C_14"].map(function(k){
+      return k in t ? ('<span>' + k + ': ' + t[k] + '</span>') : "";
+    }).join("");
+  });
+
+  // Bulk-read the pump ON/Mode coils + SP_L3 once the dash connection is up
+  // (Task 13 established it on the same submit that establishes the viewer
+  // connection) - retry on a short interval until it succeeds, since the
+  // dash client's own connect is async and there's no single "ready" event
+  // exposed to this script.
+  var refreshTimer = setInterval(function(){
+    if (window.__hmiGetDashLogin() === "") return; // nothing to read without a login configured yet
+    refreshOverviewReads();
+  }, 15000);
+  document.querySelector('#dash-nav button[data-page="overview"]').addEventListener("click", refreshOverviewReads);
+})();
+</script>
+<script>
+(function(){
+  var groupsEl = document.getElementById("spGroups");
+  var groups = {};
+  HmiLogic.SETPOINTS.forEach(function(sp){ (groups[sp.group] = groups[sp.group] || []).push(sp); });
+
+  Object.keys(groups).forEach(function(groupName){
+    var section = document.createElement("section");
+    section.className = "panel" + (groupName === "4-20mA calibration" ? " collapsed" : "");
+    var collapsible = groupName === "4-20mA calibration";
+    section.innerHTML =
+      '<div class="panel-head"' + (collapsible ? ' id="spCalHead"' : '') + '><h2>' + groupName + '</h2></div>' +
+      '<div class="panel-body"></div>';
+    var body = section.querySelector(".panel-body");
+    groups[groupName].forEach(function(sp){
+      var row = document.createElement("div");
+      row.style.cssText = "display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid var(--border)";
+      row.innerHTML =
+        '<span style="flex:1;font-size:13px">' + sp.label + ' <span class="mono" style="color:var(--ink-3)">(' + sp.name + ')</span></span>' +
+        '<input type="number" min="' + sp.min + '" max="' + sp.max + '" id="sp-input-' + sp.name + '" style="width:110px" class="mono">' +
+        '<span style="width:40px;color:var(--ink-3);font-size:12px">' + sp.unit + '</span>' +
+        '<button class="primary" data-point="' + sp.name + '">Set</button>' +
+        '<span id="sp-result-' + sp.name + '" style="font-size:12px;min-width:80px"></span>';
+      row.querySelector("button").addEventListener("click", function(){
+        var input = document.getElementById("sp-input-" + sp.name);
+        var value = parseInt(input.value, 10);
+        var resultEl = document.getElementById("sp-result-" + sp.name);
+        resultEl.textContent = "Sending...";
+        sendDashCommand("setpoint", { point: sp.name, value: value }, function(resp){
+          resultEl.textContent = resp.ok ? ("OK: " + resp.value) : ("Failed: " + resp.error);
+        });
+      });
+      body.appendChild(row);
+    });
+    groupsEl.appendChild(section);
+    if (collapsible) {
+      document.getElementById("spCalHead").addEventListener("click", function(){ section.classList.toggle("collapsed"); });
+    }
+  });
+
+  function refreshSetpoints(){
+    document.getElementById("spRefreshStatus").textContent = "Reading...";
+    readPoints(HmiLogic.SETPOINTS.map(function(s){ return s.name; }), function(resp){
+      document.getElementById("spRefreshStatus").textContent = resp.ok ? "Updated" : "Failed: " + resp.error;
+      if (!resp.ok) return;
+      Object.keys(resp.values).forEach(function(name){
+        var input = document.getElementById("sp-input-" + name);
+        if (input) input.value = resp.values[name];
+      });
+    });
+  }
+  document.getElementById("spRefreshBtn").addEventListener("click", refreshSetpoints);
+  document.querySelector('#dash-nav button[data-page="setpoints"]').addEventListener("click", refreshSetpoints);
 })();
 </script>
 
 <script>
-  const pages = ["overview", "setpoints", "active-alarms", "alarms-history"];
-  document.querySelectorAll("#dash-nav button").forEach(btn => {
-    btn.addEventListener("click", () => {
-      pages.forEach(p => {
-        document.getElementById(`page-${p}`).hidden = (p !== btn.dataset.page);
-      });
-      document.querySelectorAll("#dash-nav button").forEach(b => b.classList.remove("active"));
-      btn.classList.add("active");
-    });
-  });
-
-  const LOGIN_KEY = "ss2_dash_login";
-  function getStoredLogin() {
-    try { return localStorage.getItem(LOGIN_KEY) || ""; } catch (e) { return ""; }
+(function(){
+  function renderActiveAlarms(bitmask){
+    var faults = HmiLogic.decodeFaultBitmask(bitmask);
+    var list = document.getElementById("active-alarms-list");
+    if (faults.length === 0) { list.innerHTML = '<p style="color:var(--ink-3)">No active alarms.</p>'; return; }
+    list.innerHTML = faults.map(function(f){
+      return '<div style="padding:8px 0;border-bottom:1px solid var(--border)">' +
+        '<strong>#' + f.id + ' ' + f.title + '</strong> — ' + f.zone +
+        ' <span class="mono" style="font-size:11px;color:var(--ink-3)">(' + f.type + ', ' + f.reset + ' reset)</span></div>';
+    }).join('');
   }
-  function setStoredLogin(value) {
-    try { localStorage.setItem(LOGIN_KEY, value); } catch (e) {}
-  }
-  document.getElementById("login-submit").addEventListener("click", () => {
-    const value = document.getElementById("login-input").value;
-    setStoredLogin(value);
-    document.getElementById("login-status").textContent = "Saved (verified on first command)";
-  });
-  document.getElementById("login-input").value = getStoredLogin();
-</script>
 
-<script>
-  // dash-tier MQTT connection: separate from the read-only viewer connection
-  // above. Used for login-gated write commands (setpoint/stop/resume/clear_fault)
-  // sent to the relay over plc/<device>/dash/cmd and answered on dash/status.
-  const dashClient = mqtt.connect("wss://YOUR_HIVEMQ_HOST:8884/mqtt", {
-    username: "DASH_MQTT_USER_PLACEHOLDER", // replaced with the real value once
-                                             // Task 13 creates the credential -
-                                             // do not commit the real value here
-                                             // if this repo is public; see Task 13.
-    password: "DASH_MQTT_PASS_PLACEHOLDER",
-    // Do NOT queue QoS-0 publishes made while disconnected (mqtt.js defaults
-    // this to true). Otherwise a control command clicked while offline is
-    // silently held and delivered minutes later on reconnect - the relay would
-    // sign a fresh ARM window at that later time and the PLC would act on it,
-    // even though the UI already told the operator "Failed: timeout" after 8s.
-    // Dropping the publish is what makes that timeout outcome final.
-    queueQoSZero: false,
-  });
-  const DEVICE_ID = "plc-38ar-01";
-  const DASH_CMD_TOPIC = `plc/${DEVICE_ID}/dash/cmd`;
-  const DASH_STATUS_TOPIC = `plc/${DEVICE_ID}/dash/status`;
-  const pendingRequests = {};
-
-  dashClient.on("connect", () => dashClient.subscribe(DASH_STATUS_TOPIC));
-  dashClient.on("message", (topic, message) => {
-    if (topic !== DASH_STATUS_TOPIC) return;
-    const resp = JSON.parse(message.toString());
-    const handler = pendingRequests[resp.id];
-    if (handler) { handler(resp); delete pendingRequests[resp.id]; }
+  document.addEventListener("hmi:telemetry", function(e){
+    if ("FaultBitmask" in e.detail) renderActiveAlarms(e.detail.FaultBitmask);
   });
 
-  function sendDashCommand(action, extra, onResult) {
-    const id = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-    const payload = Object.assign({ id, login: getStoredLogin(), action }, extra || {});
-    pendingRequests[id] = onResult;
-    dashClient.publish(DASH_CMD_TOPIC, JSON.stringify(payload));
-    setTimeout(() => {
-      if (pendingRequests[id]) { pendingRequests[id]({ id, ok: false, error: "timeout" }); delete pendingRequests[id]; }
-    }, 8000); // relay-unreachable case from the spec's Error handling section
-  }
-</script>
-
-<script>
-  document.getElementById("sp-submit").addEventListener("click", () => {
-    const point = document.getElementById("sp-name").value;
-    const value = parseInt(document.getElementById("sp-value").value, 10);
-    document.getElementById("sp-result").textContent = "Sending...";
-    sendDashCommand("setpoint", { point, value }, (resp) => {
-      document.getElementById("sp-result").textContent = resp.ok
-        ? `OK: ${resp.point} = ${resp.value}`
-        : `Failed: ${resp.error}`;
-    });
+  document.addEventListener("hmi:alert", function(e){
+    var li = document.createElement("li");
+    li.textContent = e.detail;
+    document.getElementById("alarms-history-list").prepend(li);
   });
-</script>
 
-<script>
-  function wireAlarmAction(buttonId, action) {
-    document.getElementById(buttonId).addEventListener("click", () => {
+  function wireAlarmAction(buttonId, action){
+    document.getElementById(buttonId).addEventListener("click", function(){
       document.getElementById("alarm-action-result").textContent = "Sending...";
-      sendDashCommand(action, {}, (resp) => {
-        document.getElementById("alarm-action-result").textContent = resp.ok
-          ? `OK` : `Failed: ${resp.error}`;
+      sendDashCommand(action, {}, function(resp){
+        document.getElementById("alarm-action-result").textContent = resp.ok ? "OK" : ("Failed: " + resp.error);
       });
     });
   }
   wireAlarmAction("stop-btn", "stop");
   wireAlarmAction("resume-btn", "resume");
   wireAlarmAction("clear-fault-btn", "clear_fault");
+})();
 </script>
 
 <script>
-  // Reuses whatever alert-handling callback the pre-existing Overview code
-  // already has - append each incoming alert here too (wired via the
-  // addAlert() function in the Overview script above).
-  function appendToAlarmsHistory(alertText) {
-    const li = document.createElement("li");
-    li.textContent = alertText;
-    document.getElementById("alarms-history-list").prepend(li);
+(function(){
+  var TRANSPORT_NAMES = { 0: "None", 1: "Ethernet", 2: "WiFi", 3: "LTE" };
+
+  document.addEventListener("hmi:telemetry", function(e){
+    var t = e.detail;
+    if (!("ActiveTransport" in t)) return;
+    document.getElementById("transportStatus").textContent =
+      "Active: " + (TRANSPORT_NAMES[t.ActiveTransport] || t.ActiveTransport) +
+      " · WiFi: " + (t.WiFi_Connected ? ("connected, RSSI " + t.WiFi_RSSI + " dBm") : "not connected");
+  });
+
+  var TOGGLES = [
+    { point: "Ethernet_Disabled", label: "Disable Ethernet" },
+    { point: "WiFi_Disabled", label: "Disable WiFi" },
+    { point: "LTE_Disabled", label: "Disable LTE" },
+  ];
+  var toggleState = {};
+  function renderToggles(){
+    var container = document.getElementById("transportToggles");
+    container.innerHTML = "";
+    TOGGLES.forEach(function(tg){
+      var btn = document.createElement("button");
+      btn.className = "primary";
+      var isOn = toggleState[tg.point] === 1;
+      btn.textContent = tg.label + (isOn ? " (currently disabled)" : "");
+      btn.addEventListener("click", function(){
+        if (!confirm(tg.label + "? Confirm this transport is not the only one keeping the device reachable.")) return;
+        sendDashCommand("coil", { point: tg.point, value: isOn ? 0 : 1 }, function(resp){
+          if (resp.ok) { toggleState[tg.point] = isOn ? 0 : 1; renderToggles(); }
+        });
+      });
+      container.appendChild(btn);
+    });
   }
+  renderToggles();
+
+  var dosingModeState = {};
+  function renderDosingMode(){
+    var el = document.getElementById("dosingModeControl");
+    var isAuto = dosingModeState.B14 === 1;
+    el.innerHTML = "";
+    var btn = document.createElement("button");
+    btn.className = "primary";
+    btn.textContent = "Mode: " + (isAuto ? "Auto (by NO3 meter)" : "Manual (SP_F01)") + " — click to switch";
+    btn.addEventListener("click", function(){
+      sendDashCommand("coil", { point: "B14", value: isAuto ? 0 : 1 }, function(resp){
+        if (resp.ok) { dosingModeState.B14 = isAuto ? 0 : 1; renderDosingMode(); }
+      });
+    });
+    el.appendChild(btn);
+  }
+  renderDosingMode();
+
+  function refreshSystemReads(){
+    readPoints(["Ethernet_Disabled", "WiFi_Disabled", "LTE_Disabled", "B14"], function(resp){
+      if (!resp.ok) return;
+      Object.assign(toggleState, resp.values);
+      Object.assign(dosingModeState, resp.values);
+      renderToggles();
+      renderDosingMode();
+    });
+  }
+  document.querySelector('#dash-nav button[data-page="system"]').addEventListener("click", refreshSystemReads);
+
+  document.getElementById("rebootBtn").addEventListener("click", function(){
+    if (!confirm("Reboot the PLC now? This restarts the board immediately.")) return;
+    var resultEl = document.getElementById("rebootResult");
+    resultEl.textContent = "Sending...";
+    sendDashCommand("coil", { point: "System_Reboot", value: 1 }, function(resp){
+      resultEl.textContent = resp.ok ? "Reboot triggered" : ("Failed: " + resp.error);
+    });
+  });
+
+  // Email: 32 packed registers per slot ("recipient" = the daily-digest
+  // block, "alert0".."alert4" = the 5 alert-recipient slots), plus each
+  // slot's own apply coil. Mirrors daily_email.cpp's packString()/
+  // unpackString() exactly (see hmi-logic.js).
+  var MAIL_SLOTS = {
+    recipient: { regPrefix: "Mail_Recipient_Reg", applyPoint: "Mail_Recipient_Apply", count: 32 },
+  };
+  for (var slot = 0; slot < 5; slot++) {
+    MAIL_SLOTS["alert" + slot] = {
+      regPrefix: "Mail_Recipient_AlertReg" + slot + "_", applyPoint: "Mail_Recipient_AlertApply" + slot, count: 32,
+    };
+  }
+
+  function mailRegPoints(slotDef){
+    var pts = [];
+    for (var i = 0; i < slotDef.count; i++) pts.push(slotDef.regPrefix + i);
+    return pts;
+  }
+
+  function setMailSlot(slotKey, inputEl, resultEl){
+    var slotDef = MAIL_SLOTS[slotKey];
+    var email = inputEl.value.trim();
+    var regs;
+    try { regs = HmiLogic.packEmailToRegisters(email, slotDef.count); }
+    catch (err) { resultEl.textContent = "Too long"; return; }
+    resultEl.textContent = "Writing...";
+    var remaining = slotDef.count;
+    var failed = false;
+    regs.forEach(function(value, i){
+      sendDashCommand("setpoint", { point: slotDef.regPrefix + i, value: value }, function(resp){
+        if (!resp.ok) failed = true;
+        remaining--;
+        if (remaining === 0) {
+          if (failed) { resultEl.textContent = "Failed writing registers"; return; }
+          sendDashCommand("coil", { point: slotDef.applyPoint, value: 1 }, function(applyResp){
+            resultEl.textContent = applyResp.ok ? "Saved" : ("Failed: " + applyResp.error);
+          });
+        }
+      });
+    });
+  }
+
+  document.querySelector('[data-mail-slot="recipient"]').addEventListener("click", function(){
+    setMailSlot("recipient", document.getElementById("mailRecipient"), document.getElementById("mailResult-recipient"));
+  });
+
+  var alertSlotsEl = document.getElementById("mailAlertSlots");
+  for (var s = 0; s < 5; s++) {
+    (function(slotKey, slotIndex){
+      var row = document.createElement("div");
+      row.style.cssText = "display:flex;gap:10px;align-items:center;margin-bottom:10px";
+      row.innerHTML =
+        '<label style="font-size:13px;min-width:160px">Alert recipient ' + (slotIndex + 1) + '</label>' +
+        '<input type="email" style="flex:1;max-width:300px" id="mail-input-' + slotKey + '">' +
+        '<button class="primary">Set</button>' +
+        '<span id="mailResult-' + slotKey + '" style="font-size:12px"></span>';
+      row.querySelector("button").addEventListener("click", function(){
+        setMailSlot(slotKey, document.getElementById("mail-input-" + slotKey), document.getElementById("mailResult-" + slotKey));
+      });
+      alertSlotsEl.appendChild(row);
+    })("alert" + s, s);
+  }
+
+  document.getElementById("sendDailyEmailNowBtn").addEventListener("click", function(){
+    var resultEl = document.getElementById("sendDailyEmailResult");
+    resultEl.textContent = "Sending...";
+    sendDashCommand("coil", { point: "Send_Daily_Email_Now", value: 1 }, function(resp){
+      resultEl.textContent = resp.ok ? "Triggered" : ("Failed: " + resp.error);
+    });
+  });
+})();
 </script>
+</body>
+</html>
