@@ -34,7 +34,9 @@
   /* Header */
   /* Header + SIM strip stick together so the strip never scrolls away. */
   .topbar{ position:sticky; top:0; z-index:20; }
-  #simPanel{ scroll-margin-top:110px; } /* the strip's scrollIntoView lands below the sticky bar */
+  /* --topbar-h is measured live (script below) - the SIM strip wraps to 2-3
+     lines on narrow screens, so no fixed guess fits every case. */
+  #simPanel{ scroll-margin-top:calc(var(--topbar-h, 56px) + 12px); }
   header#hdr{ display:flex; align-items:center; gap:10px; padding:8px 16px; background:var(--surface); border-bottom:1px solid var(--border); }
   .brand{ font-weight:700; }
   nav#dash-nav{ display:flex; gap:4px; }
@@ -104,7 +106,7 @@
   .html-sim.is-sim::after{ content:"SIM"; margin-left:6px; font-size:10px; font-weight:700; color:#fff; background:var(--sim); border-radius:3px; padding:0 4px; vertical-align:middle; font-family:"IBM Plex Sans",sans-serif; }
 
   /* Faceplate (Level 4 popup) */
-  .faceplate{ position:fixed; right:16px; top:64px; width:290px; z-index:30; background:var(--surface); border:1px solid var(--border); border-radius:10px; box-shadow:0 6px 24px rgba(28,35,38,.18); }
+  .faceplate{ position:fixed; right:16px; top:calc(var(--topbar-h, 56px) + 8px); width:290px; z-index:30; background:var(--surface); border:1px solid var(--border); border-radius:10px; box-shadow:0 6px 24px rgba(28,35,38,.18); }
   .seg{ display:inline-flex; border:1px solid var(--border); border-radius:8px; overflow:hidden; }
   .seg button{ font:inherit; font-size:13px; font-weight:600; border:0; background:var(--surface); color:var(--ink-2); padding:6px 14px; cursor:pointer; }
   .seg button.on{ background:var(--ink); color:#fff; }
@@ -154,6 +156,13 @@
     .faceplate{ left:12px; right:12px; width:auto; top:auto; bottom:74px; }
     .sp-row{ grid-template-columns:1fr 90px 44px; }
     .review-bar{ bottom:70px; }
+    /* The 640-wide mimic renders at ~57% on a 390 px phone, which left
+       11 px labels at ~6 px. These source sizes land at ~10-14 px. */
+    .eq-label{ font-size:20px; }
+    .inst-text{ font-size:15px; }
+    .tank-title{ font-size:21px; }
+    .tank-value{ font-size:19px; } /* must fit the SIM dashed box */
+    .mimic-note{ font-size:14px; } /* the FT flow note sits at the left edge */
   }
 </style>
 </head>
@@ -400,6 +409,12 @@
   </section>
   <section class="panel">
     <div class="panel-body">
+      <p style="font-weight:600;margin:0 0 8px">Firmware and last restart</p>
+      <div id="bootInfo" class="small muted">Waiting for the PLC's boot report (firmware 2026-09-24-v6 or newer).</div>
+    </div>
+  </section>
+  <section class="panel">
+    <div class="panel-body">
       <p style="font-weight:600;margin:0 0 8px">Transport status</p>
       <div id="transportStatus" class="mono" style="font-size:13px"></div>
       <p style="font-weight:600;margin:14px 0 4px">Transport toggles</p>
@@ -463,6 +478,7 @@
   var OPERATOR_USERNAME = "SS2-operator"; // matches whichever username orir provisions as the write-capable credential on HiveMQ - update here if it differs
   var TOPIC_TELEMETRY = "plc/" + DEVICE_ID + "/telemetry";
   var TOPIC_ALERTS = "plc/" + DEVICE_ID + "/alerts";
+  var TOPIC_BOOT = "plc/" + DEVICE_ID + "/boot"; // retained, one per PLC boot (firmware v6+)
   var TOPIC_DASH_CMD = "plc/" + DEVICE_ID + "/dash/cmd";
   var TOPIC_DASH_STATUS = "plc/" + DEVICE_ID + "/dash/status";
   var STALE_MS = 90000;
@@ -599,7 +615,7 @@
       els.connectBtn.disabled = false; els.connectBtn.textContent = "Sign in";
       setStatus("", "Waiting for telemetry");
       els.signedInAs.textContent = "Signed in as " + login.user + (isOperator ? " (operator)" : " (viewer, read-only)");
-      var topics = [TOPIC_TELEMETRY, TOPIC_ALERTS];
+      var topics = [TOPIC_TELEMETRY, TOPIC_ALERTS, TOPIC_BOOT];
       if (isOperator) topics.push(TOPIC_DASH_STATUS);
       client.subscribe(topics, function(err){
         if(err){ els.connError.textContent = "Connected, but subscribe failed: " + err.message; els.connError.classList.add("show"); }
@@ -615,6 +631,10 @@
       var text = payload.toString();
       if(topic === TOPIC_TELEMETRY){ try{ applyTelemetry(JSON.parse(text)); }catch(e){} }
       else if(topic === TOPIC_ALERTS){ addAlert(text); }
+      else if(topic === TOPIC_BOOT){
+        try{ window.__hmiLastBoot = JSON.parse(text); }catch(e){ return; }
+        document.dispatchEvent(new CustomEvent("hmi:boot", { detail: window.__hmiLastBoot }));
+      }
       else if(topic === TOPIC_DASH_STATUS){
         var resp; try{ resp = JSON.parse(text); }catch(e){ return; }
         var handler = pendingRequests[resp.id];
@@ -856,8 +876,11 @@
   }
 
   function write(point, value, message){
-    armIdle();
+    // No idle close while the confirm dialog is up - the operator is mid-
+    // decision; closing the popup under them would orphan the confirm.
+    clearTimeout(idleTimer);
     window.hmiConfirm(message).then(function(ok){
+      armIdle();
       if (!ok) return;
       $("fpResult").textContent = "Sending…";
       sendDashCommand("coil", { point: point, value: value }, function(resp){
@@ -1471,6 +1494,49 @@
       $("simrow-" + p.name).classList.remove("is-sim-row");
     });
   });
+})();
+</script>
+<script>
+// Keeps --topbar-h equal to the sticky header + SIM strip's real height, so
+// the pump popup and the SIM panel's scroll target sit just below it.
+(function(){
+  var bar = document.querySelector(".topbar");
+  function measure(){ document.documentElement.style.setProperty("--topbar-h", bar.offsetHeight + "px"); }
+  measure();
+  if (window.ResizeObserver) new ResizeObserver(measure).observe(bar);
+  else window.addEventListener("resize", measure);
+})();
+</script>
+<script>
+// System page: firmware + last restart, from the retained boot message.
+(function(){
+  var box = document.getElementById("bootInfo");
+  function line(label, value, critical){
+    var div = document.createElement("div");
+    var k = document.createElement("span"); k.className = "muted"; k.textContent = label + ": ";
+    var v = document.createElement("span"); v.textContent = value;
+    if (critical) { v.style.color = "var(--critical)"; v.style.fontWeight = "700"; }
+    div.appendChild(k); div.appendChild(v);
+    return div;
+  }
+  function render(boot){
+    var d = HmiLogic.describeBoot(boot);
+    if (!d) return;
+    box.className = "small";
+    box.textContent = "";
+    box.appendChild(line("Firmware", d.build));
+    var when = d.bootedAt ? d.bootedAt.toLocaleString() : "time unknown (clock not set at boot)";
+    box.appendChild(line("Last restart", d.reasonText + " · " + when, d.abnormal));
+    box.appendChild(line("Update status", d.imageText, false));
+    box.appendChild(line("Came online via", d.transportText + " · " + d.wifiText));
+  }
+  document.addEventListener("hmi:boot", function(e){ render(e.detail); });
+  document.addEventListener("hmi:signout", function(){
+    window.__hmiLastBoot = null;
+    box.className = "small muted";
+    box.textContent = "Waiting for the PLC's boot report (firmware 2026-09-24-v6 or newer).";
+  });
+  if (window.__hmiLastBoot) render(window.__hmiLastBoot);
 })();
 </script>
 </body>

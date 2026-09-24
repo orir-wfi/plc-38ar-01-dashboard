@@ -313,13 +313,40 @@
     }),
   };
 
+  // Retained plc/<id>/boot message (firmware 2026-09-24-v6+): what the
+  // System page shows about the last restart. Crash/watchdog/brownout are
+  // flagged abnormal - a crash loop shows up here immediately.
+  const BOOT_REASONS = {
+    power_on: 'Power on', external: 'External reset',
+    software: 'Software restart (update or reboot command)',
+    crash: 'Crash (firmware fault)', watchdog: 'Watchdog reset',
+    brownout: 'Brownout (supply voltage dip)', deep_sleep: 'Wake from sleep',
+  };
+  const BOOT_ABNORMAL = { crash: true, watchdog: true, brownout: true };
+  const TRANSPORT_NAMES = { 0: 'None', 1: 'Ethernet', 2: 'WiFi', 3: 'LTE' };
+  function describeBoot(boot) {
+    if (!boot) return null;
+    const reset = boot.reset || 'unknown';
+    const hasTime = typeof boot.t === 'number' && boot.t > 0;
+    const upS = Math.floor((Number(boot.uptime_ms) || 0) / 1000);
+    return {
+      build: boot.build || '—',
+      reasonText: BOOT_REASONS[reset] || ('Unknown (' + reset + ')'),
+      abnormal: !!BOOT_ABNORMAL[reset],
+      imageText: boot.image === 'pending_verify' ? 'New update, not yet confirmed' : 'Confirmed',
+      transportText: TRANSPORT_NAMES[boot.transport] || 'Unknown',
+      wifiText: boot.wifi ? 'WiFi connected' : 'WiFi not connected',
+      bootedAt: hasTime ? new Date((boot.t - upS) * 1000) : null,
+    };
+  }
+
   const HmiLogic = {
     FAULTS, decodeFaultBitmask, SETPOINTS, scaleTelemetryValue,
     packEmailToRegisters, unpackRegistersToEmail,
     STEP_NAMES, stepName, stepLabel,
     SIM_POINTS, simPointsFromMask, simEnableWrites, realValue, simValueText, simConfirmMessage,
     validateNumber, setpointDiff, pumpState, dosingText, batchOutcome, alarmSummary,
-    createRing, sparklinePath, DEMO_FRAMES,
+    createRing, sparklinePath, DEMO_FRAMES, describeBoot,
   };
 
   if (typeof module !== 'undefined' && module.exports) {
