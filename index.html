@@ -9,208 +9,395 @@
 <script src="https://cdn.jsdelivr.net/npm/mqtt@5.10.1/dist/mqtt.min.js" integrity="sha384-u4uqeACkFcoKl57rBQJHVGDd1pqhW4w8X3WjTu1ZksPdxoLqdt34jpoNkJisE25W" crossorigin="anonymous"></script>
 <script src="hmi-logic.js"></script>
 <style>
+  /* ISA-101 (hmi-design-full): light-only, neutral gray background, off-white
+     panels. Colour carries meaning only: red = alarm/fault, amber = warning,
+     magenta = simulation, teal = navigation/submit. No green, nothing blinks. */
   :root{
-    --bg:#f4f6f7; --surface:#ffffff; --surface-2:#eef2f3; --border:#dbe2e4;
-    --ink:#16232a; --ink-2:#4c626c; --ink-3:#7d939c;
-    --accent:#0e7c86; --accent-ink:#ffffff; --accent-tint:#e2f2f2;
-    --good:#1f8a4c; --warning:#966018; --critical:#c23b3b; --critical-tint:#fbeaea;
-    --focus:#0e7c86; --shadow: 0 1px 2px rgba(22,35,42,.06), 0 6px 20px rgba(22,35,42,.05);
-  }
-  @media (prefers-color-scheme: dark){
-    :root:not([data-theme="light"]){
-      --bg:#0d1417; --surface:#141d21; --surface-2:#192327; --border:#26343a;
-      --ink:#e7eef0; --ink-2:#a9bcc2; --ink-3:#728990;
-      --accent:#2fb8c4; --accent-ink:#06181a; --accent-tint:#122a2d;
-      --good:#3fbd74; --warning:#e0a53f; --critical:#e2585b; --critical-tint:#2a1516;
-      --focus:#2fb8c4; --shadow: 0 1px 2px rgba(0,0,0,.3), 0 8px 24px rgba(0,0,0,.35);
-    }
-  }
-  :root[data-theme="dark"]{
-    --bg:#0d1417; --surface:#141d21; --surface-2:#192327; --border:#26343a;
-    --ink:#e7eef0; --ink-2:#a9bcc2; --ink-3:#728990;
-    --accent:#2fb8c4; --accent-ink:#06181a; --accent-tint:#122a2d;
-    --good:#3fbd74; --warning:#e0a53f; --critical:#e2585b; --critical-tint:#2a1516;
-    --focus:#2fb8c4; --shadow: 0 1px 2px rgba(0,0,0,.3), 0 8px 24px rgba(0,0,0,.35);
+    color-scheme: light;
+    --bg:#e3e5e6; --surface:#f6f7f7; --surface-2:#eceeee; --border:#c8cccd;
+    --ink:#1c2326; --ink-2:#4a5357; --ink-3:#6f787c;
+    --equip:#4a5357; --level:#9fb4b8;
+    --accent:#0e7c86; --accent-ink:#ffffff; --accent-tint:#dcebec;
+    --warning:#966018; --critical:#c23b3b; --critical-tint:#fbeaea;
+    --sim:#b0269f; --sim-tint:#f7e3f5; --sim-ink:#8a1a82;
+    --focus:#0e7c86; --shadow: 0 1px 2px rgba(28,35,38,.08);
   }
   *{box-sizing:border-box;}
-  body{ margin:0; background:var(--bg); color:var(--ink); font-family:"IBM Plex Sans",system-ui,sans-serif; font-size:14px; line-height:1.5; }
-  .mono{ font-family:"IBM Plex Mono","SF Mono",Consolas,monospace; font-variant-numeric:tabular-nums; }
-  .wrap{ max-width:960px; margin:0 auto; padding:20px 20px 56px; }
-  nav#dash-nav{ display:flex; gap:4px; padding:10px 20px; background:var(--surface); border-bottom:1px solid var(--border); flex-wrap:wrap; }
-  nav#dash-nav button{ font-family:inherit; font-size:13px; font-weight:600; border:1px solid transparent; background:transparent; color:var(--ink-2); padding:8px 14px; border-radius:8px; cursor:pointer; }
+  body{ margin:0; background:var(--bg); color:var(--ink); font-family:"IBM Plex Sans",system-ui,sans-serif; font-size:14px; line-height:1.5; overflow-x:hidden; }
+  [hidden]{ display:none !important; }
+  .mono{ font-family:"IBM Plex Mono",Consolas,monospace; font-variant-numeric:tabular-nums; }
+  .muted{ color:var(--ink-3); } .small{ font-size:12px; }
+  .wrap{ max-width:1100px; margin:0 auto; padding:14px 16px 56px; }
+  h2.sec{ font-size:14.5px; font-weight:600; margin:0 0 10px; }
+  :focus-visible{ outline:2px solid var(--focus); outline-offset:2px; }
+
+  /* Header */
+  /* Header + SIM strip stick together so the strip never scrolls away. */
+  .topbar{ position:sticky; top:0; z-index:20; }
+  #simPanel{ scroll-margin-top:110px; } /* the strip's scrollIntoView lands below the sticky bar */
+  header#hdr{ display:flex; align-items:center; gap:10px; padding:8px 16px; background:var(--surface); border-bottom:1px solid var(--border); }
+  .brand{ font-weight:700; }
+  nav#dash-nav{ display:flex; gap:4px; }
+  nav#dash-nav button{ font:inherit; font-size:13px; font-weight:600; border:0; background:transparent; color:var(--ink-2); padding:8px 14px; border-radius:8px; cursor:pointer; }
   nav#dash-nav button:hover{ background:var(--surface-2); }
   nav#dash-nav button.active{ background:var(--accent-tint); color:var(--accent); }
-  .page[hidden]{ display:none; }
-  section.panel{ background:var(--surface); border:1px solid var(--border); border-radius:14px; box-shadow:var(--shadow); margin-bottom:18px; overflow:hidden; }
-  .panel-head{ display:flex; align-items:center; justify-content:space-between; gap:12px; padding:14px 18px; border-bottom:1px solid var(--border); cursor:pointer; user-select:none; }
-  .panel-head h2{ margin:0; font-size:14.5px; font-weight:600; }
-  .panel-body{ padding:16px 18px 18px; }
-  .panel.collapsed .panel-body{ display:none; }
-  .status-block{ display:flex; align-items:center; gap:10px; padding:10px 20px; background:var(--surface); border-bottom:1px solid var(--border); }
-  .pill{ display:inline-flex; align-items:center; gap:7px; padding:5px 11px; border-radius:100px; font-size:12.5px; font-weight:600; border:1px solid var(--border); background:var(--surface); }
+  .hdr-right{ margin-left:auto; display:flex; gap:8px; align-items:center; }
+  .pill{ display:inline-flex; align-items:center; gap:7px; padding:4px 10px; border-radius:100px; font-size:12.5px; font-weight:600; border:1px solid var(--border); background:var(--surface); color:var(--ink-2); }
   .pill .dot{ width:7px; height:7px; border-radius:50%; background:var(--ink-3); }
-  .pill.live{ color:var(--good); border-color:color-mix(in srgb, var(--good) 35%, var(--border)); }
-  .pill.live .dot{ background:var(--good); }
-  .pill.stale{ color:var(--warning); }
-  .pill.stale .dot{ background:var(--warning); }
-  .pill.down{ color:var(--critical); }
-  .pill.down .dot{ background:var(--critical); }
-  form.conn-form{ display:grid; grid-template-columns:1.6fr .7fr 1fr 1fr auto; gap:10px; align-items:end; }
-  @media (max-width:720px){ form.conn-form{ grid-template-columns:1fr 1fr; } }
-  .field label{ display:block; font-size:12px; color:var(--ink-2); margin-bottom:5px; font-weight:500; }
-  .field input{ width:100%; background:var(--surface-2); border:1px solid var(--border); border-radius:8px; padding:8px 10px; color:var(--ink); font-size:13px; font-family:"IBM Plex Mono",monospace; }
-  button.primary{ font-family:inherit; font-size:13px; font-weight:600; background:var(--accent); color:var(--accent-ink); border-radius:8px; border:none; padding:9px 16px; cursor:pointer; }
-  button.primary:disabled{ opacity:.55; cursor:default; }
+  .pill.stale{ color:var(--warning); border-color:var(--warning); } .pill.stale .dot{ background:var(--warning); }
+  .pill.down{ color:var(--critical); border-color:var(--critical); } .pill.down .dot{ background:var(--critical); }
+  .alarm-btn{ font:inherit; font-size:13px; font-weight:600; border:1px solid var(--border); background:var(--surface); color:var(--ink-2); padding:5px 12px; border-radius:8px; cursor:pointer; }
+  .alarm-btn.active{ border:2px solid var(--critical); color:var(--critical); background:var(--critical-tint); }
+  .lastseen{ font-size:11.5px; color:var(--ink-3); padding:4px 16px 0; max-width:1100px; margin:0 auto; }
+  .sim-strip{ display:block; width:100%; text-align:left; font:inherit; font-size:13px; font-weight:700; background:var(--sim-tint); color:var(--sim-ink); border:0; border-bottom:2px solid var(--sim); padding:6px 16px; cursor:pointer; }
+
+  /* Panels, fields, buttons */
+  section.panel{ background:var(--surface); border:1px solid var(--border); border-radius:10px; box-shadow:var(--shadow); margin-bottom:14px; overflow:hidden; }
+  .panel-head{ display:flex; align-items:center; justify-content:space-between; gap:12px; padding:12px 16px; border-bottom:1px solid var(--border); }
+  .panel-head h2{ margin:0; font-size:14.5px; font-weight:600; }
+  .panel-body{ padding:14px 16px 16px; }
+  .panel.collapsed .panel-body{ display:none; }
+  .field{ margin-bottom:10px; }
+  .field label{ display:block; font-size:12px; color:var(--ink-2); margin-bottom:4px; font-weight:500; }
+  .field input, .sim-row input, .sim-row select{ width:100%; background:var(--surface-2); border:1px solid var(--border); box-shadow:inset 0 1px 2px rgba(0,0,0,.08); border-radius:6px; padding:7px 9px; color:var(--ink); font-size:13px; font-family:"IBM Plex Mono",monospace; }
+  button.primary{ font:inherit; font-size:13px; font-weight:600; background:var(--accent); color:var(--accent-ink); border-radius:8px; border:none; padding:8px 16px; cursor:pointer; }
+  button.secondary{ font:inherit; font-size:13px; font-weight:600; background:var(--surface); color:var(--ink-2); border:1px solid var(--border); border-radius:8px; padding:7px 12px; cursor:pointer; }
+  /* Process actions look different from navigation and form submit. */
+  button.action{ font:inherit; font-size:13px; font-weight:700; background:var(--surface); color:var(--ink); border:2px solid var(--ink); border-radius:8px; padding:7px 14px; cursor:pointer; }
+  button:disabled{ opacity:.5; cursor:default; }
   .conn-error{ margin-top:10px; font-size:12.5px; color:var(--critical); display:none; }
   .conn-error.show{ display:block; }
-  .di-grid{ display:grid; grid-template-columns:repeat(2,1fr); gap:8px; }
-  .di-tile{ display:flex; align-items:center; gap:9px; border:1px solid var(--border); border-radius:10px; padding:9px 10px; background:var(--surface-2); }
-  .di-dot{ width:9px; height:9px; border-radius:50%; background:var(--border); border:1px solid var(--ink-3); flex:none; }
-  .di-tile[data-state="1"] .di-dot{ background:var(--accent); border-color:var(--accent); }
-  .di-name{ font-family:"IBM Plex Mono",monospace; font-size:12px; }
-  .di-state{ font-size:10.5px; letter-spacing:.05em; color:var(--ink-3); font-weight:600; }
-  .di-tile[data-state="1"] .di-state{ color:var(--accent); }
-  .alerts-list{ display:flex; flex-direction:column; max-height:280px; overflow-y:auto; }
-  .alert-row{ display:flex; gap:12px; padding:9px 0; border-bottom:1px solid var(--border); }
-  .alert-time{ font-family:"IBM Plex Mono",monospace; font-size:11.5px; color:var(--ink-3); }
+  .signin{ max-width:380px; margin:40px auto; }
+  details.advanced{ margin:4px 0 12px; font-size:12.5px; color:var(--ink-2); }
+
+  /* Overview */
+  .ov-grid{ display:grid; grid-template-columns:2fr 1fr; gap:14px; align-items:start; }
+  #mimicSvg{ width:100%; height:auto; display:block; }
+  .kv{ padding:8px 0; border-bottom:1px solid var(--border); }
+  .kv:last-child{ border-bottom:0; }
+  .kv .k{ font-size:11.5px; color:var(--ink-3); }
+  .kv .v{ font-size:18px; font-weight:600; display:inline-block; }
+  .kv .sub{ font-size:12px; color:var(--ink-2); }
+  svg.spark{ width:100%; height:26px; display:block; }
+  svg.spark path{ fill:none; stroke:var(--ink-3); stroke-width:1.5; vector-effect:non-scaling-stroke; }
+  /* Equipment symbols read these custom properties through <use>. */
+  .equip{ --eq-fill:var(--surface); --eq-stroke:var(--equip); --eq-mark:var(--equip); --eq-sw:2.5; --eq-dash:none; cursor:pointer; }
+  .equip.running{ --eq-fill:var(--equip); --eq-mark:var(--surface); }
+  .equip.fault{ --eq-stroke:var(--critical); --eq-sw:3.5; }
+  .inst{ --eq-fill:var(--surface); --eq-stroke:var(--equip); --eq-sw:2; --eq-dash:none; }
+  .inst.fault{ --eq-stroke:var(--critical); --eq-sw:3; }
+  .inst.is-sim, .equip.is-sim{ --eq-stroke:var(--sim); --eq-sw:3; --eq-dash:4 2; }
+  .eq-label{ font-size:11px; fill:var(--ink); text-anchor:middle; font-weight:600; }
+  .inst-text{ font-size:10px; fill:var(--ink); text-anchor:middle; dominant-baseline:central; font-weight:600; }
+  .badge-mode rect{ fill:var(--ink); } .badge-mode text{ fill:#fff; font-size:9px; text-anchor:middle; font-weight:700; }
+  .badge-fault path{ fill:var(--critical); } .badge-fault text{ fill:#fff; font-size:9px; font-weight:700; text-anchor:middle; }
+  .badge-sim rect{ fill:var(--sim); } .badge-sim text{ fill:#fff; font-size:7.5px; font-weight:700; text-anchor:middle; }
+  .simable .sim-frame, .simable .badge-sim, .inst .badge-sim{ display:none; }
+  .simable.is-sim .sim-frame, .simable.is-sim .badge-sim, .inst.is-sim .badge-sim{ display:inline; }
+  .sim-frame{ fill:none; stroke:var(--sim); stroke-width:2; stroke-dasharray:4 2; }
+  .tank{ fill:var(--surface-2); stroke:var(--ink-3); stroke-width:1.5; }
+  .level{ fill:var(--level); }
+  .tank-title{ font-size:12px; font-weight:600; fill:var(--ink); text-anchor:middle; }
+  .tank-value{ font-size:15px; font-weight:600; fill:var(--ink); text-anchor:middle; font-family:"IBM Plex Mono",monospace; }
+  .mimic-note{ font-size:10.5px; fill:var(--ink-2); text-anchor:middle; font-family:"IBM Plex Mono",monospace; }
+  .html-sim.is-sim{ outline:2px dashed var(--sim); outline-offset:2px; border-radius:4px; color:var(--sim-ink); }
+  .html-sim.is-sim::after{ content:"SIM"; margin-left:6px; font-size:10px; font-weight:700; color:#fff; background:var(--sim); border-radius:3px; padding:0 4px; vertical-align:middle; font-family:"IBM Plex Sans",sans-serif; }
+
+  /* Faceplate (Level 4 popup) */
+  .faceplate{ position:fixed; right:16px; top:64px; width:290px; z-index:30; background:var(--surface); border:1px solid var(--border); border-radius:10px; box-shadow:0 6px 24px rgba(28,35,38,.18); }
+  .seg{ display:inline-flex; border:1px solid var(--border); border-radius:8px; overflow:hidden; }
+  .seg button{ font:inherit; font-size:13px; font-weight:600; border:0; background:var(--surface); color:var(--ink-2); padding:6px 14px; cursor:pointer; }
+  .seg button.on{ background:var(--ink); color:#fff; }
+
+  /* Setpoints */
+  .sp-row{ display:grid; grid-template-columns:1fr 110px 54px; gap:10px; align-items:center; padding:6px 0; border-bottom:1px solid var(--border); }
+  .sp-row input{ width:100%; background:var(--surface-2); border:1px solid var(--border); box-shadow:inset 0 1px 2px rgba(0,0,0,.08); border-radius:6px; padding:6px 8px; font-family:"IBM Plex Mono",monospace; font-size:13px; color:var(--ink); }
+  .sp-row input.changed{ border:2px solid var(--accent); }
+  .sp-row input.invalid{ border:2px solid var(--critical); }
+  .sp-row .err{ grid-column:1/-1; color:var(--critical); font-size:12px; }
+  .review-bar{ position:sticky; bottom:12px; display:flex; gap:10px; align-items:center; justify-content:flex-end; background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:10px 14px; box-shadow:0 4px 16px rgba(28,35,38,.15); }
+  .review-bar span{ margin-right:auto; font-weight:600; }
+
+  /* Alarms */
+  .alarm-row{ display:flex; gap:10px; align-items:baseline; padding:8px 0; border-bottom:1px solid var(--border); }
+  .prio{ font-weight:700; }
+  .prio.fault{ color:var(--critical); } .prio.alert{ color:var(--warning); }
+  .actions{ display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:12px; }
+  ul.history{ padding-left:18px; margin:0; font-size:13px; }
+
+  /* System */
+  .sim-row{ display:grid; grid-template-columns:1.4fr 1fr 110px auto auto; gap:10px; align-items:center; padding:8px 0; border-bottom:1px solid var(--border); }
+  .sim-row.is-sim-row{ background:var(--sim-tint); box-shadow:inset 3px 0 0 var(--sim); }
+  .row-line{ display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:10px; }
+  .row-line label{ font-size:13px; min-width:160px; }
+  .row-line input{ flex:1; max-width:300px; background:var(--surface-2); border:1px solid var(--border); border-radius:6px; padding:7px 9px; font-family:"IBM Plex Mono",monospace; }
+
+  /* Confirm dialog */
+  dialog.confirm{ border:1px solid var(--border); border-radius:10px; padding:18px; max-width:380px; background:var(--surface); color:var(--ink); }
+  dialog.confirm::backdrop{ background:rgba(28,35,38,.35); }
+  #confirmText{ white-space:pre-line; margin:0 0 14px; }
+  .dlg-actions{ display:flex; gap:8px; justify-content:flex-end; }
+
+  /* Responsive */
+  @media (max-width:900px){
+    .ov-grid{ grid-template-columns:1fr; }
+    .sim-row{ grid-template-columns:1fr 1fr; }
+  }
+  @media (max-width:600px){
+    header#hdr{ padding:8px 12px; }
+    nav#dash-nav{ position:fixed; left:0; right:0; bottom:0; z-index:25; justify-content:space-around; background:var(--surface); border-top:1px solid var(--border); padding:6px 4px calc(6px + env(safe-area-inset-bottom)); }
+    nav#dash-nav button{ padding:8px 10px; }
+    .wrap{ padding:12px 12px 90px; }
+    .values-panel{ order:-1; }
+    .values-panel .kv-list{ display:grid; grid-template-columns:1fr 1fr; gap:0 12px; }
+    .values-panel .desk-only, .values-panel svg.spark{ display:none; }
+    .faceplate{ left:12px; right:12px; width:auto; top:auto; bottom:74px; }
+    .sp-row{ grid-template-columns:1fr 90px 44px; }
+    .review-bar{ bottom:70px; }
+  }
 </style>
 </head>
 <body>
 
-<nav id="dash-nav">
-  <button data-page="overview" class="active">Overview</button>
-  <button data-page="setpoints">Setpoints</button>
-  <button data-page="active-alarms">Active Alarms</button>
-  <button data-page="alarms-history">Alarms History</button>
-  <button data-page="system">System</button>
-</nav>
-
-<div class="status-block">
-  <span class="pill" id="statusPill"><span class="dot"></span><span id="statusText">Not connected</span></span>
-  <span class="mono" id="lastSeen" style="font-size:12px;color:var(--ink-3)">No telemetry received yet</span>
+<div class="topbar">
+<header id="hdr">
+  <span class="brand">SS2</span>
+  <nav id="dash-nav" aria-label="Pages">
+    <button type="button" data-page="overview" class="active">Overview</button>
+    <button type="button" data-page="setpoints">Setpoints</button>
+    <button type="button" data-page="alarms">Alarms</button>
+    <button type="button" data-page="system">System</button>
+  </nav>
+  <div class="hdr-right">
+    <span class="pill" id="statusPill"><span class="dot"></span><span id="statusText">Not connected</span></span>
+    <button type="button" class="alarm-btn" id="alarmBtn">No alarms</button>
+  </div>
+</header>
+<button type="button" class="sim-strip" id="simStrip" hidden></button>
 </div>
+<div class="lastseen mono" id="lastSeen">No telemetry received yet</div>
 
-<div id="page-overview" class="page">
+<div id="signin" class="page">
 <div class="wrap">
-  <section class="panel" id="connPanel">
-    <div class="panel-head" id="connPanelHead">
-      <h2>Broker connection <span id="connSummary" style="font-weight:400;color:var(--ink-2)"></span></h2>
-    </div>
+  <section class="panel signin">
     <div class="panel-body">
-      <form class="conn-form" id="connForm">
-        <div class="field"><label for="fHost">Broker host</label><input id="fHost" type="text" placeholder="xxxxxxxx.s1.eu.hivemq.cloud"></div>
-        <div class="field"><label for="fPort">WSS port</label><input id="fPort" type="text" placeholder="8884"></div>
-        <div class="field"><label for="fUser">Viewer username</label><input id="fUser" type="text"></div>
-        <div class="field"><label for="fPass">Viewer password</label><input id="fPass" type="password"></div>
-        <div><button type="submit" class="primary" id="connectBtn">Connect</button></div>
+      <h2 class="sec">Sign in</h2>
+      <p class="muted small" style="margin-top:-6px">SS2 TAYA denitrification pilot, Web HMI</p>
+      <form id="connForm">
+        <div class="field"><label for="fUser">Username</label><input id="fUser" name="username" type="text" autocomplete="username" required></div>
+        <div class="field"><label for="fPass">Password</label><input id="fPass" name="password" type="password" autocomplete="current-password"></div>
+        <details class="advanced"><summary>Advanced</summary>
+          <div class="field"><label for="fHost">Broker host</label><input id="fHost" name="host" type="text" autocomplete="off"></div>
+          <div class="field"><label for="fPort">WSS port</label><input id="fPort" name="port" type="text" inputmode="numeric" autocomplete="off"></div>
+        </details>
+        <button type="submit" class="primary" id="connectBtn">Sign in</button>
       </form>
       <div class="conn-error" id="connError"></div>
-      <div class="field" style="margin-top:12px;max-width:320px">
-        <label for="dashUser">Dash username (for writes)</label>
-        <input id="dashUser" type="text" autocomplete="off">
+    </div>
+  </section>
+</div>
+</div>
+
+<dialog class="confirm" id="confirmDialog">
+  <p id="confirmText"></p>
+  <div class="dlg-actions">
+    <button type="button" class="secondary" id="confirmCancel">Cancel</button>
+    <button type="button" class="primary" id="confirmOk">Confirm</button>
+  </div>
+</dialog>
+
+<div class="faceplate" id="faceplate" hidden role="dialog" aria-labelledby="fpTitle">
+  <div class="panel-head">
+    <h2 id="fpTitle">—</h2>
+    <div style="display:flex;gap:6px">
+      <button type="button" class="secondary" id="fpPin">Pin</button>
+      <button type="button" class="secondary" id="fpClose" aria-label="Close">&#x2715;</button>
+    </div>
+  </div>
+  <div class="panel-body">
+    <div class="kv"><div class="k">State</div><div class="v" id="fpState">—</div></div>
+    <div class="kv"><div class="k">Mode</div>
+      <div class="seg" id="fpMode"><button type="button" data-mode="0">Auto</button><button type="button" data-mode="1">Manual</button></div>
+      <span class="muted small" id="fpModeUnknown" hidden style="margin-left:8px">Mode unknown</span>
+    </div>
+    <div class="kv" id="fpManual" hidden>
+      <div class="k">Manual control</div>
+      <div class="actions" style="margin:4px 0 0">
+        <button type="button" class="action" id="fpStart">Start</button>
+        <button type="button" class="action" id="fpStop">Stop</button>
       </div>
-      <div class="field" style="max-width:320px">
-        <label for="dashPass">Dash password</label>
-        <input id="dashPass" type="password" autocomplete="off">
+    </div>
+    <p class="muted small" id="fpNote" style="margin:8px 0 0"></p>
+    <p class="small" id="fpResult" style="margin:4px 0 0"></p>
+  </div>
+</div>
+
+<div id="page-overview" class="page" hidden>
+<div class="wrap">
+  <div class="ov-grid">
+    <section class="panel mimic-panel">
+      <div class="panel-body">
+        <svg id="mimicSvg" viewBox="0 0 640 345" role="img" aria-label="Pilot skid schematic">
+          <defs>
+            <symbol id="sym-pump" viewBox="-16 -16 32 32">
+              <circle r="13" style="fill:var(--eq-fill);stroke:var(--eq-stroke);stroke-width:var(--eq-sw);stroke-dasharray:var(--eq-dash)"/>
+              <path d="M-5,-7 L9,0 L-5,7Z" style="fill:var(--eq-mark)"/>
+            </symbol>
+            <symbol id="sym-dosing" viewBox="-16 -16 32 32">
+              <rect x="-12" y="-12" width="24" height="24" style="fill:var(--eq-fill);stroke:var(--eq-stroke);stroke-width:var(--eq-sw);stroke-dasharray:var(--eq-dash)"/>
+              <path d="M-5,-6 L6,0 L-5,6Z" style="fill:var(--eq-mark)"/>
+              <line x1="-12" y1="12" x2="12" y2="-12" style="stroke:var(--eq-mark);stroke-width:1.5"/>
+            </symbol>
+            <symbol id="sym-inst" viewBox="-16 -16 32 32">
+              <circle r="13" style="fill:var(--eq-fill);stroke:var(--eq-stroke);stroke-width:var(--eq-sw);stroke-dasharray:var(--eq-dash)"/>
+            </symbol>
+          </defs>
+
+          <!-- TAYA 2 (left, per the PDF's own labeling) -->
+          <text class="tank-title" x="120" y="36">TAYA 2</text>
+          <rect class="tank" x="60" y="46" width="120" height="204" rx="4"/>
+          <rect class="level" id="mimicLT02Bar" x="62" y="248" width="116" height="0"/>
+          <g class="simable" data-sim-point="LT02">
+            <rect class="sim-frame" x="76" y="134" width="88" height="26" rx="4"/>
+            <text class="tank-value" id="mimicLT02Value" x="120" y="153">—</text>
+            <g class="badge-sim" transform="translate(156,130)"><rect x="-12" y="-7" width="24" height="12" rx="2"/><text y="2">SIM</text></g>
+          </g>
+          <g class="inst" data-sim-point="LT02" transform="translate(202,64)">
+            <use href="#sym-inst" x="-14" y="-14" width="28" height="28"/><text class="inst-text">LT</text>
+            <g class="badge-sim" transform="translate(14,-14)"><rect x="-12" y="-7" width="24" height="12" rx="2"/><text y="2">SIM</text></g>
+          </g>
+
+          <!-- TAYA 1 (right, per the PDF's own labeling) -->
+          <text class="tank-title" x="520" y="36">TAYA 1</text>
+          <rect class="tank" x="460" y="46" width="120" height="204" rx="4"/>
+          <rect class="level" id="mimicLT01Bar" x="462" y="248" width="116" height="0"/>
+          <g class="simable" data-sim-point="LT01">
+            <rect class="sim-frame" x="476" y="134" width="88" height="26" rx="4"/>
+            <text class="tank-value" id="mimicLT01Value" x="520" y="153">—</text>
+            <g class="badge-sim" transform="translate(556,130)"><rect x="-12" y="-7" width="24" height="12" rx="2"/><text y="2">SIM</text></g>
+          </g>
+          <g class="inst" data-sim-point="LT01" transform="translate(438,64)">
+            <use href="#sym-inst" x="-14" y="-14" width="28" height="28"/><text class="inst-text">LT</text>
+            <g class="badge-sim" transform="translate(-14,-14)"><rect x="-12" y="-7" width="24" height="12" rx="2"/><text y="2">SIM</text></g>
+          </g>
+
+          <!-- Sugar tank with LS0 -->
+          <text class="tank-title" x="320" y="148">Sugar tank</text>
+          <rect class="tank" x="270" y="158" width="100" height="92" rx="4"/>
+          <g class="inst" id="mimicLS0" data-sim-point="LS0_low" transform="translate(320,196)">
+            <use href="#sym-inst" x="-14" y="-14" width="28" height="28"/><text class="inst-text">LS</text>
+            <g class="badge-sim" transform="translate(16,-14)"><rect x="-12" y="-7" width="24" height="12" rx="2"/><text y="2">SIM</text></g>
+          </g>
+          <text class="mimic-note" id="mimicLS0Label" x="320" y="236">—</text>
+
+          <!-- Inlet: FT101 + P4 -->
+          <!-- Below FT101, clear of the TAYA 2 tank (x>=60 ends at y=250) even for "12,345 L/h". -->
+          <text class="mimic-note" id="mimicFlow" x="42" y="261">—</text>
+          <g class="inst" data-sim-point="FT101_P" transform="translate(42,232)">
+            <use href="#sym-inst" x="-14" y="-14" width="28" height="28"/><text class="inst-text">FT</text>
+            <g class="badge-sim" transform="translate(14,-14)"><rect x="-12" y="-7" width="24" height="12" rx="2"/><text y="2">SIM</text></g>
+          </g>
+
+          <!-- Pumps: P1 (TAYA1), P2 (TAYA2), P3 (sugar mix), P4 (inlet), DP1 (dosing) -->
+          <g id="eqP4" class="equip" data-pump="P4" transform="translate(42,290)" tabindex="0" role="button" aria-label="Pump P4">
+            <use href="#sym-pump" x="-16" y="-16" width="32" height="32"/><text class="eq-label" y="31">P4</text>
+            <g class="badge-mode" style="display:none"><rect x="7" y="-24" width="13" height="13" rx="2"/><text x="13.5" y="-14.5">M</text></g>
+            <g class="badge-fault" style="display:none"><path d="M-12,-26 L-2,-9 L-22,-9Z"/><text x="-12" y="-11">!</text></g>
+          </g>
+          <g id="eqP2" class="equip" data-pump="P2" transform="translate(120,290)" tabindex="0" role="button" aria-label="Pump P2">
+            <use href="#sym-pump" x="-16" y="-16" width="32" height="32"/><text class="eq-label" y="31">P2</text>
+            <g class="badge-mode" style="display:none"><rect x="7" y="-24" width="13" height="13" rx="2"/><text x="13.5" y="-14.5">M</text></g>
+            <g class="badge-fault" style="display:none"><path d="M-12,-26 L-2,-9 L-22,-9Z"/><text x="-12" y="-11">!</text></g>
+          </g>
+          <g id="eqP3" class="equip" data-pump="P3" transform="translate(290,290)" tabindex="0" role="button" aria-label="Pump P3">
+            <use href="#sym-pump" x="-16" y="-16" width="32" height="32"/><text class="eq-label" y="31">P3</text>
+            <g class="badge-mode" style="display:none"><rect x="7" y="-24" width="13" height="13" rx="2"/><text x="13.5" y="-14.5">M</text></g>
+            <g class="badge-fault" style="display:none"><path d="M-12,-26 L-2,-9 L-22,-9Z"/><text x="-12" y="-11">!</text></g>
+          </g>
+          <g id="eqDP1" class="equip" data-pump="DP1" transform="translate(352,290)" tabindex="0" role="button" aria-label="Dosing pump DP1">
+            <use href="#sym-dosing" x="-16" y="-16" width="32" height="32"/><text class="eq-label" y="31">DP1</text>
+            <g class="badge-mode" style="display:none"><rect x="7" y="-24" width="13" height="13" rx="2"/><text x="13.5" y="-14.5">M</text></g>
+            <g class="badge-fault" style="display:none"><path d="M-12,-26 L-2,-9 L-22,-9Z"/><text x="-12" y="-11">!</text></g>
+          </g>
+          <text class="mimic-note" id="mimicDosing" x="352" y="338">—</text>
+          <g id="eqP1" class="equip" data-pump="P1" transform="translate(520,290)" tabindex="0" role="button" aria-label="Pump P1">
+            <use href="#sym-pump" x="-16" y="-16" width="32" height="32"/><text class="eq-label" y="31">P1</text>
+            <g class="badge-mode" style="display:none"><rect x="7" y="-24" width="13" height="13" rx="2"/><text x="13.5" y="-14.5">M</text></g>
+            <g class="badge-fault" style="display:none"><path d="M-12,-26 L-2,-9 L-22,-9Z"/><text x="-12" y="-11">!</text></g>
+          </g>
+        </svg>
+        <p class="muted small" style="margin:6px 0 0">Tap a pump for details. Solid = running, hollow = stopped, M = manual.</p>
       </div>
-      <div class="field" style="max-width:320px">
-        <label for="dashLogin">Operator login (for writes)</label>
-        <input id="dashLogin" type="password" autocomplete="off">
+    </section>
+
+    <section class="panel values-panel">
+      <div class="panel-body kv-list">
+        <div class="kv"><div class="k">Step</div><div class="v mono" id="vStep">—</div><div class="sub" id="vStepName"></div></div>
+        <div class="kv"><div class="k">Inlet flow</div><div class="v mono html-sim" data-sim-point="FT101_P" id="vFlow">—</div>
+          <svg class="spark" viewBox="0 0 200 26" preserveAspectRatio="none"><path id="sparkFlow"/></svg></div>
+        <div class="kv"><div class="k">NO3</div><div class="v mono html-sim" data-sim-point="AIT01_NO3" id="vNo3">—</div><div class="sub" id="vNo3Avg"></div>
+          <svg class="spark" viewBox="0 0 200 26" preserveAspectRatio="none"><path id="sparkNo3"/></svg></div>
+        <div class="kv"><div class="k">Dosing</div><div class="v mono" id="vDosing">—</div></div>
+        <div class="kv desk-only"><div class="k">TAYA 1 level</div><div class="v mono html-sim" data-sim-point="LT01" id="vLt01">—</div>
+          <svg class="spark" viewBox="0 0 200 26" preserveAspectRatio="none"><path id="sparkLt01"/></svg></div>
+        <div class="kv desk-only"><div class="k">TAYA 2 level</div><div class="v mono html-sim" data-sim-point="LT02" id="vLt02">—</div>
+          <svg class="spark" viewBox="0 0 200 26" preserveAspectRatio="none"><path id="sparkLt02"/></svg></div>
+        <div class="kv desk-only"><div class="k">Cycles today</div><div class="v mono" id="vCycles">—</div><div class="sub" id="vCyclesSub"></div></div>
       </div>
-    </div>
-  </section>
-
-  <section class="panel">
-    <div class="panel-body">
-      <p style="font-weight:600;margin:0 0 12px">System overview</p>
-      <div id="mimicStatusBadge" style="margin-bottom:10px;font-size:13px"></div>
-      <svg id="mimicSvg" viewBox="0 0 600 320" style="width:100%;height:auto;max-width:600px" role="img" aria-label="Pilot skid schematic">
-        <!-- Sugar tank (small, center) -->
-        <rect x="255" y="180" width="90" height="80" rx="6" fill="var(--surface-2)" stroke="var(--border)"/>
-        <text x="300" y="270" text-anchor="middle" font-size="11" fill="var(--ink-2)">Sugar tank</text>
-        <circle id="mimicLS0Dot" cx="300" cy="220" r="8" fill="var(--border)"/>
-        <text id="mimicLS0Label" x="300" y="225" text-anchor="middle" font-size="9" fill="var(--ink)"></text>
-
-        <!-- TAYA 2 (left, per the PDF's own labeling) -->
-        <rect x="60" y="60" width="120" height="200" rx="6" fill="var(--surface-2)" stroke="var(--border)"/>
-        <rect id="mimicLT02Bar" x="66" y="256" width="108" height="0" fill="var(--accent)" opacity="0.35"/>
-        <text x="120" y="45" text-anchor="middle" font-size="12" font-weight="600" fill="var(--ink)">TAYA 2</text>
-        <text id="mimicLT02Value" x="120" y="160" text-anchor="middle" font-size="14" class="mono" fill="var(--ink)"></text>
-
-        <!-- TAYA 1 (right, per the PDF's own labeling) -->
-        <rect x="420" y="60" width="120" height="200" rx="6" fill="var(--surface-2)" stroke="var(--border)"/>
-        <rect id="mimicLT01Bar" x="426" y="256" width="108" height="0" fill="var(--accent)" opacity="0.35"/>
-        <text x="480" y="45" text-anchor="middle" font-size="12" font-weight="600" fill="var(--ink)">TAYA 1</text>
-        <text id="mimicLT01Value" x="480" y="160" text-anchor="middle" font-size="14" class="mono" fill="var(--ink)"></text>
-
-        <!-- Pumps: P1 (TAYA1 circ), P2 (TAYA2 circ), P3 (sugar mix), P4 (inlet), DP1 (dosing) -->
-        <g id="mimicPumpP1"><circle cx="480" cy="285" r="12" fill="var(--border)"/><text x="480" y="289" text-anchor="middle" font-size="9" fill="var(--ink)">P1</text></g>
-        <g id="mimicPumpP2"><circle cx="120" cy="285" r="12" fill="var(--border)"/><text x="120" y="289" text-anchor="middle" font-size="9" fill="var(--ink)">P2</text></g>
-        <g id="mimicPumpP3"><circle cx="255" cy="300" r="12" fill="var(--border)"/><text x="255" y="304" text-anchor="middle" font-size="9" fill="var(--ink)">P3</text></g>
-        <g id="mimicPumpP4"><circle cx="30" cy="300" r="12" fill="var(--border)"/><text x="30" y="304" text-anchor="middle" font-size="9" fill="var(--ink)">P4</text></g>
-        <g id="mimicPumpDP1"><circle cx="345" cy="300" r="12" fill="var(--border)"/><text x="345" y="304" text-anchor="middle" font-size="8" fill="var(--ink)">DP1</text></g>
-
-        <text id="mimicFlow" x="30" y="315" text-anchor="middle" font-size="9" class="mono" fill="var(--ink-2)"></text>
-        <text id="mimicNO3" x="345" y="315" text-anchor="middle" font-size="9" class="mono" fill="var(--ink-2)"></text>
-      </svg>
-      <div id="mimicManualControls" style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap"></div>
-    </div>
-  </section>
-
-  <section class="panel">
-    <div class="panel-body">
-      <p style="font-weight:600;margin:0 0 8px">Daily counters</p>
-      <div id="countersStrip" class="mono" style="display:flex;gap:20px;flex-wrap:wrap;font-size:13px"></div>
-    </div>
-  </section>
-
-  <section class="panel">
-    <div class="panel-body">
-      <p style="font-weight:600;margin:0 0 8px">Alerts</p>
-      <div class="alerts-list" id="alertsList"><div id="alertsEmpty" style="color:var(--ink-3)">No alerts received yet this session.</div></div>
-    </div>
-  </section>
+    </section>
+  </div>
 </div>
 </div>
 
 <div id="page-setpoints" class="page" hidden>
 <div class="wrap">
   <section class="panel">
-    <div class="panel-body">
-      <button class="primary" id="spRefreshBtn">Refresh current values</button>
-      <span id="spRefreshStatus" style="margin-left:10px;font-size:12px;color:var(--ink-3)"></span>
+    <div class="panel-body row-line" style="margin:0">
+      <button type="button" class="secondary" id="spRefreshBtn">Reload values</button>
+      <span class="muted small" id="spRefreshStatus"></span>
     </div>
   </section>
   <div id="spGroups"></div>
+  <div class="review-bar" id="reviewBar" hidden>
+    <span id="reviewCount"></span>
+    <button type="button" class="secondary" id="spDiscard">Discard</button>
+    <button type="button" class="primary" id="spReview">Review changes</button>
+  </div>
 </div>
 </div>
-<div id="page-active-alarms" class="page" hidden>
+<div id="page-alarms" class="page" hidden>
 <div class="wrap">
   <section class="panel">
     <div class="panel-body">
-      <div style="display:flex;gap:8px;margin-bottom:14px">
-        <button class="primary" id="stop-btn">Stop</button>
-        <button class="primary" id="resume-btn">Resume</button>
-        <button class="primary" id="clear-fault-btn">Clear Fault</button>
-        <span id="alarm-action-result" style="align-self:center;font-size:12px"></span>
+      <h2 class="sec">Active alarms</h2>
+      <div class="actions">
+        <button type="button" class="action" id="stop-btn">Stop</button>
+        <button type="button" class="action" id="resume-btn">Resume</button>
+        <button type="button" class="action" id="clear-fault-btn">Clear fault</button>
+        <span id="alarm-action-result" class="small"></span>
       </div>
-      <div id="active-alarms-list"><p style="color:var(--ink-3)">No active alarms.</p></div>
+      <p class="muted small" id="alarmReadOnly" hidden style="margin:-4px 0 10px">Read-only: sign in as operator to stop, resume or clear faults.</p>
+      <div id="active-alarms-list"><p class="muted">No active alarms.</p></div>
     </div>
   </section>
-</div>
-</div>
-<div id="page-alarms-history" class="page" hidden>
-<div class="wrap">
   <section class="panel">
     <div class="panel-body">
-      <p class="note" style="color:var(--ink-3);font-size:12px">Session-only — resets on page reload. The relay has no inbound endpoint to query persisted history.</p>
-      <ul id="alarms-history-list" style="padding-left:18px"></ul>
+      <h2 class="sec">History (this session)</h2>
+      <p class="muted small">Resets when the page reloads or you sign out. Stored alarm history is not available yet.</p>
+      <ul id="alarms-history-list" class="history"></ul>
     </div>
   </section>
 </div>
 </div>
 <div id="page-system" class="page" hidden>
 <div class="wrap">
+  <section class="panel">
+    <div class="panel-body row-line" style="margin:0">
+      <span id="signedInAs" class="small"></span>
+      <button type="button" class="secondary" id="signOutBtn" style="margin-left:auto">Sign out</button>
+      <p class="muted small" id="sysReadOnly" hidden style="margin:0;flex-basis:100%">Read-only: sign in as operator to change transports, dosing mode, reboot, email or simulation.</p>
+    </div>
+  </section>
   <section class="panel">
     <div class="panel-body">
       <p style="font-weight:600;margin:0 0 8px">Transport status</p>
@@ -222,6 +409,7 @@
         confirm the device is still reachable before touching another.
       </p>
       <div id="transportToggles" style="display:flex;gap:16px;flex-wrap:wrap"></div>
+      <p class="small" id="transportResult" style="margin:8px 0 0"></p>
     </div>
   </section>
 
@@ -229,13 +417,14 @@
     <div class="panel-body">
       <p style="font-weight:600;margin:0 0 8px">Dosing mode</p>
       <div id="dosingModeControl"></div>
+      <p class="small" id="dosingModeResult" style="margin:8px 0 0"></p>
     </div>
   </section>
 
   <section class="panel">
     <div class="panel-body">
       <p style="font-weight:600;margin:0 0 8px">Reboot</p>
-      <button class="primary" id="rebootBtn">Reboot PLC</button>
+      <button type="button" class="action" id="rebootBtn">Reboot PLC</button>
       <span id="rebootResult" style="margin-left:10px;font-size:12px"></span>
     </div>
   </section>
@@ -243,15 +432,24 @@
   <section class="panel">
     <div class="panel-body">
       <p style="font-weight:600;margin:0 0 8px">Email</p>
-      <div style="display:flex;gap:10px;align-items:center;margin-bottom:10px">
+      <div class="row-line">
         <label for="mailRecipient" style="font-size:13px;min-width:160px">Daily digest recipient</label>
         <input id="mailRecipient" type="email" style="flex:1;max-width:300px">
-        <button class="primary" data-mail-slot="recipient">Set</button>
+        <button type="button" class="primary" data-mail-slot="recipient">Set</button>
         <span id="mailResult-recipient" style="font-size:12px"></span>
       </div>
       <div id="mailAlertSlots"></div>
-      <button class="primary" id="sendDailyEmailNowBtn" style="margin-top:10px">Send Daily Email Now</button>
+      <button type="button" class="action" id="sendDailyEmailNowBtn" style="margin-top:10px">Send Daily Email Now</button>
       <span id="sendDailyEmailResult" style="margin-left:10px;font-size:12px"></span>
+    </div>
+  </section>
+
+  <section class="panel" id="simPanel">
+    <div class="panel-body">
+      <h2 class="sec">Simulation</h2>
+      <p class="muted small" style="margin-top:-4px">A simulated value replaces the real reading everywhere in the PLC (control logic, alarms and logs) until you stop it. Simulated values show in magenta with a SIM tag on every page. Q_Stop and the overload trips can never be simulated.</p>
+      <div id="simRows"></div>
+      <p class="small" id="simResult" style="margin:8px 0 0"></p>
     </div>
   </section>
 </div>
@@ -260,402 +458,641 @@
 <script>
 (function(){
   var DEVICE_ID = "plc-38ar-01";
-  var DASH_CMD_TOPIC = "plc/" + DEVICE_ID + "/dash/cmd";
-  var DASH_STATUS_TOPIC = "plc/" + DEVICE_ID + "/dash/status";
-  var LOGIN_KEY = "ss2_hmi_dash_login";
-  var DASH_STORE_KEY = "plchmi.plc-38ar-01.dashconn";
-
-  function getStoredLogin(){ try{ return localStorage.getItem(LOGIN_KEY) || ""; }catch(e){ return ""; } }
-  function setStoredLogin(v){ try{ localStorage.setItem(LOGIN_KEY, v); }catch(e){} }
-
-  var dashClient = null;
-  var pendingRequests = {};
-
-  function connectDash(host, port, dashUser, dashPass){
-    dashClient = mqtt.connect("wss://" + host + ":" + (port || "8884") + "/mqtt", {
-      username: dashUser,
-      password: dashPass,
-      clientId: "hmidash-" + Math.random().toString(16).slice(2, 10),
-      queueQoSZero: false, // dropping a publish made while offline is correct here - see the original dashboard's comment on this exact setting
-    });
-    dashClient.on("connect", function(){ dashClient.subscribe(DASH_STATUS_TOPIC); });
-    dashClient.on("message", function(topic, message){
-      if (topic !== DASH_STATUS_TOPIC) return;
-      var resp;
-      try { resp = JSON.parse(message.toString()); } catch(e) { return; }
-      var handler = pendingRequests[resp.id];
-      if (handler) { handler(resp); delete pendingRequests[resp.id]; }
-    });
-  }
-
-  window.sendDashCommand = function(action, extra, onResult){
-    if (!dashClient || !dashClient.connected) {
-      onResult({ id: null, ok: false, error: "dash_not_connected" });
-      return;
-    }
-    var id = Date.now() + "-" + Math.random().toString(16).slice(2);
-    var payload = Object.assign({ id: id, login: getStoredLogin(), action: action }, extra || {});
-    pendingRequests[id] = onResult;
-    dashClient.publish(DASH_CMD_TOPIC, JSON.stringify(payload));
-    setTimeout(function(){
-      if (pendingRequests[id]) { pendingRequests[id]({ id: id, ok: false, error: "timeout" }); delete pendingRequests[id]; }
-    }, 8000);
-  };
-
-  window.readPoints = function(points, onResult){
-    window.sendDashCommand("read", { points: points }, onResult);
-  };
-
-  window.__hmiSetDashLogin = setStoredLogin;
-  window.__hmiGetDashLogin = getStoredLogin;
-  window.__hmiConnectDash = connectDash;
-})();
-</script>
-<script>
-(function(){
-  var DEVICE_ID = "plc-38ar-01";
+  var DEFAULT_HOST = "fdb8d122153b4af382840aa79d99f51f.s1.eu.hivemq.cloud";
+  var DEFAULT_PORT = "8884";
+  var OPERATOR_USERNAME = "SS2-operator"; // matches whichever username orir provisions as the write-capable credential on HiveMQ - update here if it differs
   var TOPIC_TELEMETRY = "plc/" + DEVICE_ID + "/telemetry";
   var TOPIC_ALERTS = "plc/" + DEVICE_ID + "/alerts";
+  var TOPIC_DASH_CMD = "plc/" + DEVICE_ID + "/dash/cmd";
+  var TOPIC_DASH_STATUS = "plc/" + DEVICE_ID + "/dash/status";
   var STALE_MS = 90000;
-  var DIGITAL_TAGS = ["System_Switch","Reset_Inactive_Alarms","Q_Stop","P1_OL","P2_OL","P3_OL","P4_OL","P5_OL","FT101_P","LS0_low"];
-  var STORE_KEY = "plchmi.plc-38ar-01.conn";
+  var STORE_KEY = "plchmi.plc-38ar-01.login";
+  var PAGES = ["overview", "setpoints", "alarms", "system"];
 
   var client = null;
+  var isOperator = false;
   var lastSeenAt = null;
-  window.__hmiLastTelemetry = null; // read by later tasks (Overview mimic, System page)
+  var pendingRequests = {};
+  window.__hmiLastTelemetry = null;
+  window.hmiIsOperator = function(){ return isOperator; };
 
+  function $(id){ return document.getElementById(id); }
   var els = {
-    statusPill: document.getElementById("statusPill"),
-    statusText: document.getElementById("statusText"),
-    lastSeen: document.getElementById("lastSeen"),
-    connPanel: document.getElementById("connPanel"),
-    connPanelHead: document.getElementById("connPanelHead"),
-    connSummary: document.getElementById("connSummary"),
-    connForm: document.getElementById("connForm"),
-    connectBtn: document.getElementById("connectBtn"),
-    connError: document.getElementById("connError"),
-    fHost: document.getElementById("fHost"),
-    fPort: document.getElementById("fPort"),
-    fUser: document.getElementById("fUser"),
-    fPass: document.getElementById("fPass"),
-    diGrid: document.getElementById("diGrid"),
-    alertsList: document.getElementById("alertsList"),
-    alertsEmpty: document.getElementById("alertsEmpty")
+    statusPill: $("statusPill"), statusText: $("statusText"), lastSeen: $("lastSeen"),
+    alarmBtn: $("alarmBtn"), simStrip: $("simStrip"), signin: $("signin"),
+    connForm: $("connForm"), connectBtn: $("connectBtn"), connError: $("connError"),
+    fUser: $("fUser"), fPass: $("fPass"), fHost: $("fHost"), fPort: $("fPort"),
+    signedInAs: $("signedInAs"), signOutBtn: $("signOutBtn"),
+    confirmDialog: $("confirmDialog"), confirmText: $("confirmText"),
+    confirmOk: $("confirmOk"), confirmCancel: $("confirmCancel")
   };
-
-  function buildTiles(){
-    if(!els.diGrid) return; // Task 14 replaced the DI-grid panel with the mimic diagram
-    DIGITAL_TAGS.forEach(function(tag){
-      var tile = document.createElement("div");
-      tile.className = "di-tile";
-      tile.id = "di-" + tag;
-      tile.innerHTML = '<span class="di-dot"></span><span><div class="di-name">' + tag + '</div><div class="di-state">&mdash;</div></span>';
-      els.diGrid.appendChild(tile);
-    });
-  }
 
   function setStatus(kind, text){ els.statusPill.className = "pill " + kind; els.statusText.textContent = text; }
 
   function checkFreshness(){
     if(!lastSeenAt){ els.lastSeen.textContent = "No telemetry received yet"; return; }
     var secs = Math.round((Date.now() - lastSeenAt) / 1000);
-    els.lastSeen.textContent = "Last telemetry " + secs + "s ago";
+    els.lastSeen.textContent = "Last telemetry " + secs + " s ago";
     if(!client || !client.connected) return;
-    setStatus(secs * 1000 > STALE_MS ? "stale" : "live", secs * 1000 > STALE_MS ? "Connected — telemetry stale" : "Live");
+    var stale = secs * 1000 > STALE_MS;
+    setStatus(stale ? "stale" : "live", stale ? "Telemetry stale" : "Live");
+  }
+
+  window.hmiShowPage = function(name){
+    els.signin.hidden = true;
+    PAGES.forEach(function(p){ $("page-" + p).hidden = (p !== name); });
+    document.querySelectorAll("#dash-nav button").forEach(function(b){
+      b.classList.toggle("active", b.dataset.page === name);
+    });
+    document.dispatchEvent(new CustomEvent("hmi:page", { detail: name }));
+  };
+
+  function currentPage(){
+    for (var i = 0; i < PAGES.length; i++) if (!$("page-" + PAGES[i]).hidden) return PAGES[i];
+    return null;
+  }
+
+  function showSignin(){
+    PAGES.forEach(function(p){ $("page-" + p).hidden = true; });
+    els.signin.hidden = false;
+  }
+
+  // Modal confirm for every process-affecting action (ISA-101: multiple
+  // input actions, never single-click).
+  window.hmiConfirm = function(message, okLabel){
+    return new Promise(function(resolve){
+      var d = els.confirmDialog;
+      els.confirmText.textContent = message;
+      els.confirmOk.textContent = okLabel || "Confirm";
+      function done(v){
+        els.confirmOk.onclick = null; els.confirmCancel.onclick = null; d.oncancel = null;
+        if (d.open) d.close();
+        resolve(v);
+      }
+      els.confirmOk.onclick = function(){ done(true); };
+      els.confirmCancel.onclick = function(){ done(false); };
+      d.oncancel = function(e){ e.preventDefault(); done(false); };
+      d.showModal();
+    });
+  };
+
+  function renderHeader(t){
+    var s = HmiLogic.alarmSummary(t.FaultBitmask);
+    els.alarmBtn.textContent = (s.count ? "▲ " : "") + s.text;
+    els.alarmBtn.classList.toggle("active", s.count > 0);
+    var sims = HmiLogic.simPointsFromMask(t.Sim_Mask || 0);
+    els.simStrip.hidden = sims.length === 0;
+    if (sims.length) els.simStrip.textContent = "SIMULATION ACTIVE: " + sims.join(", ") + "  → Simulation panel";
+    document.querySelectorAll("[data-sim-point]").forEach(function(el){
+      el.classList.toggle("is-sim", sims.indexOf(el.getAttribute("data-sim-point")) >= 0);
+    });
   }
 
   function applyTelemetry(json){
     lastSeenAt = Date.now();
     window.__hmiLastTelemetry = json;
-    DIGITAL_TAGS.forEach(function(tag){
-      if(!(tag in json)) return;
-      var tile = document.getElementById("di-" + tag);
-      if(!tile) return;
-      tile.dataset.state = String(json[tag]);
-      tile.querySelector(".di-state").textContent = json[tag] ? "ON" : "OFF";
-    });
+    renderHeader(json);
     document.dispatchEvent(new CustomEvent("hmi:telemetry", { detail: json }));
     checkFreshness();
   }
 
   function addAlert(message){
-    if(els.alertsEmpty){ els.alertsEmpty.remove(); els.alertsEmpty = null; }
-    var row = document.createElement("div");
-    row.className = "alert-row";
-    var t = new Date();
-    row.innerHTML = '<span class="alert-time mono">' + t.toTimeString().slice(0,8) + '</span><span></span>';
-    row.lastElementChild.textContent = message;
-    els.alertsList.insertBefore(row, els.alertsList.firstChild);
-    while(els.alertsList.children.length > 50) els.alertsList.removeChild(els.alertsList.lastChild);
     document.dispatchEvent(new CustomEvent("hmi:alert", { detail: message }));
   }
 
-  function saveConn(host, port, user, pass, dashUser, dashPass){ try{ localStorage.setItem(STORE_KEY, JSON.stringify({host,port,user,pass,dashUser,dashPass})); }catch(e){} }
-  function loadConn(){ try{ var r = localStorage.getItem(STORE_KEY); return r ? JSON.parse(r) : null; }catch(e){ return null; } }
+  function saveLogin(login){ try{ localStorage.setItem(STORE_KEY, JSON.stringify(login)); }catch(e){} }
+  function loadLogin(){ try{ var r = localStorage.getItem(STORE_KEY); return r ? JSON.parse(r) : null; }catch(e){ return null; } }
 
-  function connect(host, port, user, pass){
+  window.sendDashCommand = function(action, extra, onResult){
+    if (!isOperator) { onResult({ id: null, ok: false, error: "not_operator" }); return; }
+    if (!client || !client.connected) { onResult({ id: null, ok: false, error: "dash_not_connected" }); return; }
+    var id = Date.now() + "-" + Math.random().toString(16).slice(2);
+    var payload = Object.assign({ id: id, action: action }, extra || {});
+    pendingRequests[id] = onResult;
+    client.publish(TOPIC_DASH_CMD, JSON.stringify(payload));
+    setTimeout(function(){
+      if (pendingRequests[id]) { pendingRequests[id]({ id: id, ok: false, error: "timeout" }); delete pendingRequests[id]; }
+    }, 8000);
+  };
+  window.readPoints = function(points, onResult){ window.sendDashCommand("read", { points: points }, onResult); };
+  window.sendDashBatchWrite = function(writes, onResult){ window.sendDashCommand("write", { writes: writes }, onResult); };
+
+  function connect(login){
     els.connError.classList.remove("show");
-    if(!host){ els.connError.textContent = "Enter the broker host first."; els.connError.classList.add("show"); return; }
-    port = port || "8884";
-    els.connectBtn.disabled = true; els.connectBtn.textContent = "Connecting…";
-    setStatus("idle", "Connecting…");
-    var url = "wss://" + host + ":" + port + "/mqtt";
+    els.connectBtn.disabled = true; els.connectBtn.textContent = "Signing in…";
+    setStatus("", "Connecting…");
+    isOperator = (login.user === OPERATOR_USERNAME);
+    var url = "wss://" + (login.host || DEFAULT_HOST) + ":" + (login.port || DEFAULT_PORT) + "/mqtt";
     try{
-      client = mqtt.connect(url, { username: user, password: pass, clientId: "plchmi-" + Math.random().toString(16).slice(2,10), reconnectPeriod: 4000, connectTimeout: 8000, clean: true });
+      client = mqtt.connect(url, {
+        username: login.user, password: login.pass,
+        clientId: "plchmi-" + Math.random().toString(16).slice(2,10),
+        reconnectPeriod: 4000, connectTimeout: 8000, clean: true,
+        queueQoSZero: false, // dropping a publish made while offline is correct - see the original dashboard's reasoning on this exact setting
+      });
     } catch(err){
       els.connError.textContent = "Could not open connection: " + err.message;
-      els.connError.classList.add("show"); els.connectBtn.disabled = false; els.connectBtn.textContent = "Connect";
-      setStatus("down", "Connection failed"); return;
+      els.connError.classList.add("show"); els.connectBtn.disabled = false; els.connectBtn.textContent = "Sign in";
+      setStatus("down", "Connection failed"); showSignin(); return;
     }
     client.on("connect", function(){
-      els.connectBtn.disabled = false; els.connectBtn.textContent = "Reconnect";
-      setStatus("idle", "Connected — waiting for first telemetry");
-      els.connPanel.classList.add("collapsed"); els.connSummary.textContent = "— " + host;
-      client.subscribe([TOPIC_TELEMETRY, TOPIC_ALERTS], function(err){
+      els.connectBtn.disabled = false; els.connectBtn.textContent = "Sign in";
+      setStatus("", "Waiting for telemetry");
+      els.signedInAs.textContent = "Signed in as " + login.user + (isOperator ? " (operator)" : " (viewer, read-only)");
+      var topics = [TOPIC_TELEMETRY, TOPIC_ALERTS];
+      if (isOperator) topics.push(TOPIC_DASH_STATUS);
+      client.subscribe(topics, function(err){
         if(err){ els.connError.textContent = "Connected, but subscribe failed: " + err.message; els.connError.classList.add("show"); }
+        // Once subscribed (so dash replies can arrive): show Overview after a
+        // fresh sign-in, otherwise re-announce the page already on screen so
+        // its operator reads run now - covers a reload with a saved login
+        // (the page was shown before connect()) and every reconnect.
+        if (!els.signin.hidden) window.hmiShowPage("overview");
+        else { var cur = currentPage(); if (cur) window.hmiShowPage(cur); }
       });
     });
     client.on("message", function(topic, payload){
       var text = payload.toString();
       if(topic === TOPIC_TELEMETRY){ try{ applyTelemetry(JSON.parse(text)); }catch(e){} }
       else if(topic === TOPIC_ALERTS){ addAlert(text); }
+      else if(topic === TOPIC_DASH_STATUS){
+        var resp; try{ resp = JSON.parse(text); }catch(e){ return; }
+        var handler = pendingRequests[resp.id];
+        if (handler) { handler(resp); delete pendingRequests[resp.id]; }
+      }
     });
     client.on("reconnect", function(){ setStatus("stale", "Reconnecting…"); });
     client.on("close", function(){ if(els.statusText.textContent !== "Not connected") setStatus("down", "Disconnected"); });
     client.on("error", function(err){
       els.connError.textContent = "Broker error: " + (err && err.message ? err.message : String(err));
       els.connError.classList.add("show"); setStatus("down", "Connection error");
-      els.connectBtn.disabled = false; els.connectBtn.textContent = "Connect";
+      els.connectBtn.disabled = false; els.connectBtn.textContent = "Sign in";
+      showSignin();
     });
   }
+
+  window.hmiSignOut = function(){
+    try{ localStorage.removeItem(STORE_KEY); }catch(e){}
+    if (client) { client.end(true); client = null; }
+    isOperator = false;
+    Object.keys(pendingRequests).forEach(function(id){ delete pendingRequests[id]; });
+    // Forget the previous session's data; each page script clears its own
+    // caches on hmi:signout.
+    window.__hmiLastTelemetry = null;
+    lastSeenAt = null;
+    els.signedInAs.textContent = "";
+    renderHeader({});
+    document.dispatchEvent(new CustomEvent("hmi:signout"));
+    checkFreshness();
+    setStatus("", "Not connected");
+    els.fPass.value = "";
+    showSignin();
+  };
 
   els.connForm.addEventListener("submit", function(e){
     e.preventDefault();
-    var host = els.fHost.value.trim(), port = els.fPort.value.trim(), user = els.fUser.value.trim(), pass = els.fPass.value;
-    var dashUser = document.getElementById("dashUser").value.trim(), dashPass = document.getElementById("dashPass").value;
-    saveConn(host, port, user, pass, dashUser, dashPass);
+    var login = {
+      user: els.fUser.value.trim(), pass: els.fPass.value,
+      host: els.fHost.value.trim() || DEFAULT_HOST, port: els.fPort.value.trim() || DEFAULT_PORT
+    };
+    saveLogin(login);
     if(client){ client.end(true); client = null; }
-    connect(host, port, user, pass);
-    window.__hmiConnectDash(host, port, dashUser, dashPass);
+    connect(login);
   });
+  els.signOutBtn.addEventListener("click", window.hmiSignOut);
 
-  buildTiles();
-  ["dashUser", "dashPass"].forEach(function(id){
-    var saved = loadConn() || {};
-    var key = id === "dashUser" ? "dashUser" : "dashPass";
-    document.getElementById(id).value = saved[key] || "";
-  });
-  document.getElementById("dashLogin").value = window.__hmiGetDashLogin();
-  document.getElementById("dashLogin").addEventListener("change", function(e){ window.__hmiSetDashLogin(e.target.value); });
-  var saved = loadConn();
-  if(saved){ els.fHost.value = saved.host || ""; els.fPort.value = saved.port || "8884"; els.fUser.value = saved.user || ""; els.fPass.value = saved.pass || ""; }
-  else{ els.fPort.value = "8884"; }
-  setInterval(checkFreshness, 5000);
-  if(saved && saved.host && saved.user){
-    connect(saved.host, saved.port || "8884", saved.user, saved.pass || "");
-    if(saved.dashUser) window.__hmiConnectDash(saved.host, saved.port || "8884", saved.dashUser, saved.dashPass || "");
-  }
-
-  var pages = ["overview","setpoints","active-alarms","alarms-history","system"];
   document.querySelectorAll("#dash-nav button").forEach(function(btn){
-    btn.addEventListener("click", function(){
-      pages.forEach(function(p){ document.getElementById("page-" + p).hidden = (p !== btn.dataset.page); });
-      document.querySelectorAll("#dash-nav button").forEach(function(b){ b.classList.remove("active"); });
-      btn.classList.add("active");
-    });
+    btn.addEventListener("click", function(){ window.hmiShowPage(btn.dataset.page); });
   });
+  els.alarmBtn.addEventListener("click", function(){ window.hmiShowPage("alarms"); });
+  els.simStrip.addEventListener("click", function(){
+    window.hmiShowPage("system");
+    var panel = $("simPanel");
+    if (panel) panel.scrollIntoView({ behavior: "smooth", block: "start" });
+  });
+
+  setInterval(checkFreshness, 5000);
+
+  // ?demo=<frame>: render a canned telemetry frame without a broker, for
+  // screenshots and design review (frames in hmi-logic.js DEMO_FRAMES).
+  var demo = new URLSearchParams(location.search).get("demo");
+  var saved = loadLogin();
+  els.fHost.value = (saved && saved.host) || DEFAULT_HOST;
+  els.fPort.value = (saved && saved.port) || DEFAULT_PORT;
+  if (demo && HmiLogic.DEMO_FRAMES && HmiLogic.DEMO_FRAMES[demo]) {
+    // Deferred to DOMContentLoaded so every page script below has registered
+    // its listeners (a setTimeout(0) could fire before the parser reached
+    // the last script, leaving e.g. the Simulation panel unrendered).
+    document.addEventListener("DOMContentLoaded", function(){
+      window.hmiShowPage(new URLSearchParams(location.search).get("page") || "overview");
+      applyTelemetry(HmiLogic.DEMO_FRAMES[demo]);
+    });
+  } else if (saved && saved.user) {
+    els.fUser.value = saved.user; els.fPass.value = saved.pass || "";
+    document.addEventListener("DOMContentLoaded", function(){
+      window.hmiShowPage("overview");
+      connect(saved); // on connect the current page is re-announced (F3)
+    });
+  } else {
+    showSignin();
+  }
 })();
 </script>
 <script>
 (function(){
-  var levelFullScaleCm = 160; // SP_L3 default; overwritten once the bulk read below returns
-  var pumpCoilState = {}; // e.g. {P1_ON: 0, P1_Mode: 1, ...} - from the bulk read below
+  var levelFullScaleCm = 160; // SP_L3 default; replaced by the operator bulk read
+  var coils = {};             // P*_ON / P*_Mode / B14 from the operator bulk read
+  var PUMPS = ["P1", "P2", "P3", "P4", "DP1"];
+  var rings = {
+    LT01: HmiLogic.createRing(120), LT02: HmiLogic.createRing(120),
+    NO3: HmiLogic.createRing(120), FLOW: HmiLogic.createRing(120)
+  };
 
-  function setBar(id, valueCm){
-    var el = document.getElementById(id);
-    var h = Math.max(0, Math.min(200, (valueCm / levelFullScaleCm) * 200));
-    el.setAttribute("y", 256 - h);
-    el.setAttribute("height", h);
+  function $(id){ return document.getElementById(id); }
+  function setText(id, text){ $(id).textContent = text; }
+  function setBar(id, cm){
+    var h = Math.max(0, Math.min(200, (cm / levelFullScaleCm) * 200));
+    $(id).setAttribute("y", 248 - h);
+    $(id).setAttribute("height", h);
+  }
+  function drawSpark(pathId, ring){ $(pathId).setAttribute("d", HmiLogic.sparklinePath(ring.values(), 200, 26)); }
+
+  function renderPumps(t){
+    PUMPS.forEach(function(p){
+      var s = HmiLogic.pumpState(p, t, coils);
+      var g = $("eq" + p);
+      g.classList.toggle("running", s.running);
+      g.classList.toggle("fault", s.fault);
+      g.querySelector(".badge-mode").style.display = s.manual === true ? "inline" : "none"; // null = unknown: no badge
+      g.querySelector(".badge-fault").style.display = s.fault ? "inline" : "none";
+      g.setAttribute("aria-label", "Pump " + p + (s.running ? ", running" : ", stopped") +
+                     (s.manual === true ? ", manual" : s.manual === null ? ", mode unknown" : "") + (s.fault ? ", fault" : ""));
+    });
   }
 
-  function renderPump(tag, onCoil, modeCoil){
-    var g = document.getElementById("mimicPump" + tag);
-    var circle = g.querySelector("circle");
-    var on = pumpCoilState[onCoil] === 1;
-    var isAuto = pumpCoilState[modeCoil] !== 0; // default Auto-looking until the real value arrives
-    circle.setAttribute("fill", on ? "var(--good)" : "var(--border)");
-    var existingBtn = document.getElementById("mimicBtn" + tag);
-    if (existingBtn) existingBtn.remove();
-    if (!isAuto) {
-      var btn = document.createElement("button");
-      btn.id = "mimicBtn" + tag;
-      btn.className = "primary";
-      btn.textContent = tag + (on ? " OFF" : " ON");
-      btn.addEventListener("click", function(){
-        sendDashCommand("coil", { point: onCoil, value: on ? 0 : 1 }, function(resp){
-          if (resp.ok) { pumpCoilState[onCoil] = on ? 0 : 1; renderPump(tag, onCoil, modeCoil); }
-        });
-      });
-      document.getElementById("mimicManualControls").appendChild(btn);
+  function render(t){
+    if (typeof t.LT01 === "number") {
+      setBar("mimicLT01Bar", t.LT01); setText("mimicLT01Value", t.LT01 + " cm"); setText("vLt01", t.LT01 + " cm");
+      rings.LT01.push(t.LT01); drawSpark("sparkLt01", rings.LT01);
     }
+    if (typeof t.LT02 === "number") {
+      setBar("mimicLT02Bar", t.LT02); setText("mimicLT02Value", t.LT02 + " cm"); setText("vLt02", t.LT02 + " cm");
+      rings.LT02.push(t.LT02); drawSpark("sparkLt02", rings.LT02);
+    }
+    if (typeof t.AIT01_NO3 === "number") {
+      var no3 = HmiLogic.scaleTelemetryValue("AIT01_NO3", t.AIT01_NO3);
+      setText("vNo3", no3.toFixed(1) + " ppm"); rings.NO3.push(no3); drawSpark("sparkNo3", rings.NO3);
+    }
+    if (typeof t.NO3_Inlet_Avg === "number") {
+      setText("vNo3Avg", "Hourly average " + HmiLogic.scaleTelemetryValue("NO3_Inlet_Avg", t.NO3_Inlet_Avg).toFixed(1) + " ppm");
+    }
+    if (typeof t.FT101_Flow_Lh === "number") {
+      var flow = t.FT101_Flow_Lh.toLocaleString("en-US") + " L/h";
+      setText("vFlow", flow); setText("mimicFlow", flow);
+      rings.FLOW.push(t.FT101_Flow_Lh); drawSpark("sparkFlow", rings.FLOW);
+    }
+    setText("vStep", HmiLogic.stepLabel(t.Step, t.Cycle_Type === 1));
+    setText("vStepName", typeof t.Step === "number" ? HmiLogic.stepName(t.Step) : "");
+    var dosing = HmiLogic.dosingText(t, typeof coils.B14 === "number" ? coils.B14 === 1 : undefined);
+    setText("vDosing", dosing);
+    setText("mimicDosing", dosing === "—" ? "—" : "Dosing " + dosing);
+    if (typeof t.LS0_low === "number") {
+      var ok = t.LS0_low === 1; // active-low: 1 = normal, 0 = low
+      setText("mimicLS0Label", ok ? "Level OK" : "LOW");
+      $("mimicLS0").classList.toggle("fault", !ok);
+    }
+    if (typeof t.C_10 === "number") {
+      setText("vCycles", String(t.C_10));
+      setText("vCyclesSub", "Large " + t.C_11 + " · Small " + t.C_12);
+    }
+    renderPumps(t);
   }
 
-  function renderPumps(){
-    renderPump("P1", "P1_ON", "P1_Mode");
-    renderPump("P2", "P2_ON", "P2_Mode");
-    renderPump("P3", "P3_ON", "P3_Mode");
-    renderPump("P4", "P4_ON", "P4_Mode");
-    renderPump("DP1", "DP1_ON", "DP1_Mode");
-  }
+  window.hmiOverviewCoils = function(){ return coils; };
+  window.hmiSetCoil = function(name, value){
+    coils[name] = value;
+    if (window.__hmiLastTelemetry) render(window.__hmiLastTelemetry);
+  };
 
   function refreshOverviewReads(){
+    if (!window.hmiIsOperator()) return; // viewer: pump states fall back to the step
     readPoints(["SP_L3", "P1_ON", "P2_ON", "P3_ON", "P4_ON", "DP1_ON",
-                "P1_Mode", "P2_Mode", "P3_Mode", "P4_Mode", "DP1_Mode"], function(resp){
+                "P1_Mode", "P2_Mode", "P3_Mode", "P4_Mode", "DP1_Mode", "B14"], function(resp){
       if (!resp.ok) return;
       if (typeof resp.values.SP_L3 === "number" && resp.values.SP_L3 > 0) levelFullScaleCm = resp.values.SP_L3;
-      Object.assign(pumpCoilState, resp.values);
-      renderPumps();
+      Object.assign(coils, resp.values);
+      if (window.__hmiLastTelemetry) render(window.__hmiLastTelemetry);
     });
   }
 
-  document.addEventListener("hmi:telemetry", function(e){
-    var t = e.detail;
-    if ("LT01" in t) {
-      var lt01 = HmiLogic.scaleTelemetryValue("LT01", t.LT01);
-      setBar("mimicLT01Bar", lt01);
-      document.getElementById("mimicLT01Value").textContent = lt01 + " cm";
-    }
-    if ("LT02" in t) {
-      var lt02 = HmiLogic.scaleTelemetryValue("LT02", t.LT02);
-      setBar("mimicLT02Bar", lt02);
-      document.getElementById("mimicLT02Value").textContent = lt02 + " cm";
-    }
-    if ("LS0_low" in t) {
-      var normal = t.LS0_low === 1; // active-low: 1 = normal, 0 = low
-      document.getElementById("mimicLS0Dot").setAttribute("fill", normal ? "var(--good)" : "var(--critical)");
-      document.getElementById("mimicLS0Label").textContent = normal ? "OK" : "LOW";
-    }
-    if ("FT101_accumulated" in t) {
-      document.getElementById("mimicFlow").textContent = HmiLogic.scaleTelemetryValue("FT101_accumulated", t.FT101_accumulated).toFixed(2) + " m3/hr";
-    }
-    if ("AIT01_NO3" in t) {
-      document.getElementById("mimicNO3").textContent = HmiLogic.scaleTelemetryValue("AIT01_NO3", t.AIT01_NO3).toFixed(1) + " ppm";
-    }
-    var badge = document.getElementById("mimicStatusBadge");
-    var faultCount = t.ActiveFaultCount || 0;
-    var systemOn = t.System_Switch === 1;
-    badge.innerHTML = '<span class="pill ' + (faultCount > 0 ? "down" : (systemOn ? "live" : "")) + '"><span class="dot"></span>' +
-      (systemOn ? "System ON" : "System OFF") + (faultCount > 0 ? " — " + faultCount + " active fault(s)" : "") + '</span>';
+  function newRings(){
+    return { LT01: HmiLogic.createRing(120), LT02: HmiLogic.createRing(120),
+             NO3: HmiLogic.createRing(120), FLOW: HmiLogic.createRing(120) };
+  }
+  // Sign-out: drop the previous session's coils, trends and shown values.
+  function resetOverview(){
+    coils = {};
+    levelFullScaleCm = 160;
+    rings = newRings();
+    ["mimicLT01Value", "mimicLT02Value", "vLt01", "vLt02", "vNo3", "vFlow", "mimicFlow", "vStep",
+     "vDosing", "mimicDosing", "mimicLS0Label", "vCycles"].forEach(function(id){ setText(id, "—"); });
+    ["vNo3Avg", "vStepName", "vCyclesSub"].forEach(function(id){ setText(id, ""); });
+    setBar("mimicLT01Bar", 0); setBar("mimicLT02Bar", 0);
+    ["sparkFlow", "sparkNo3", "sparkLt01", "sparkLt02"].forEach(function(id){ $(id).setAttribute("d", ""); });
+    $("mimicLS0").classList.remove("fault");
+    renderPumps({});
+  }
 
-    var strip = document.getElementById("countersStrip");
-    strip.innerHTML = ["C_10","C_11","C_12","C_13","C_14"].map(function(k){
-      return k in t ? ('<span>' + k + ': ' + t[k] + '</span>') : "";
-    }).join("");
-  });
-
-  // Bulk-read the pump ON/Mode coils + SP_L3 once the dash connection is up
-  // (Task 13 established it on the same submit that establishes the viewer
-  // connection) - retry on a short interval until it succeeds, since the
-  // dash client's own connect is async and there's no single "ready" event
-  // exposed to this script.
-  var refreshTimer = setInterval(function(){
-    if (document.getElementById("page-overview").hidden) return; // not the visible page - skip this tick
-    if (window.__hmiGetDashLogin() === "") return; // nothing to read without a login configured yet
-    refreshOverviewReads();
+  document.addEventListener("hmi:telemetry", function(e){ render(e.detail); });
+  document.addEventListener("hmi:page", function(e){ if (e.detail === "overview") refreshOverviewReads(); });
+  document.addEventListener("hmi:signout", resetOverview);
+  setInterval(function(){
+    if (!$("page-overview").hidden) refreshOverviewReads();
   }, 15000);
-  document.querySelector('#dash-nav button[data-page="overview"]').addEventListener("click", refreshOverviewReads);
 })();
 </script>
 <script>
 (function(){
-  var groupsEl = document.getElementById("spGroups");
+  var IDLE_MS = 60000; // ISA-101: popups auto-close after inactivity unless pinned
+  var NAMES = { P1: "P1 · TAYA 1 pump", P2: "P2 · TAYA 2 pump", P3: "P3 · sugar mixing pump",
+                P4: "P4 · inlet pump", DP1: "DP1 · dosing pump" };
+  var fp = document.getElementById("faceplate");
+  var current = null, pinned = false, idleTimer = null;
+  function $(id){ return document.getElementById(id); }
+
+  function close(){ fp.hidden = true; current = null; clearTimeout(idleTimer); }
+  function armIdle(){
+    clearTimeout(idleTimer);
+    if (!pinned && current) idleTimer = setTimeout(close, IDLE_MS);
+  }
+
+  function render(){
+    if (!current) return;
+    var t = window.__hmiLastTelemetry || {};
+    var s = HmiLogic.pumpState(current, t, window.hmiOverviewCoils());
+    var op = window.hmiIsOperator();
+    $("fpTitle").textContent = NAMES[current];
+    $("fpState").textContent = (s.fault ? "Fault · " : "") + (s.running ? "Running" : "Stopped");
+    $("fpState").style.color = s.fault ? "var(--critical)" : "";
+    document.querySelectorAll("#fpMode button").forEach(function(b){
+      // manual === null (mode coil not read): highlight neither segment.
+      b.classList.toggle("on", s.manual !== null && Number(b.dataset.mode) === (s.manual ? 1 : 0));
+      b.disabled = !op;
+    });
+    $("fpModeUnknown").hidden = s.manual !== null;
+    $("fpManual").hidden = s.manual !== true;
+    $("fpStart").disabled = !op || s.running;
+    $("fpStop").disabled = !op || !s.running;
+    $("fpNote").textContent = op ? "" : "Read-only: sign in as operator to change pumps.";
+  }
+
+  function open(pump){
+    current = pump; pinned = false;
+    $("fpPin").textContent = "Pin";
+    $("fpResult").textContent = "";
+    fp.hidden = false;
+    render();
+    armIdle();
+  }
+
+  function write(point, value, message){
+    armIdle();
+    window.hmiConfirm(message).then(function(ok){
+      if (!ok) return;
+      $("fpResult").textContent = "Sending…";
+      sendDashCommand("coil", { point: point, value: value }, function(resp){
+        $("fpResult").textContent = resp.ok ? "Done." : ("Failed: " + resp.error);
+        if (resp.ok) window.hmiSetCoil(point, value);
+        render();
+      });
+    });
+  }
+
+  document.querySelectorAll("#mimicSvg .equip").forEach(function(g){
+    g.addEventListener("click", function(){ open(g.dataset.pump); });
+    g.addEventListener("keydown", function(e){
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(g.dataset.pump); }
+    });
+  });
+  document.querySelectorAll("#fpMode button").forEach(function(b){
+    b.addEventListener("click", function(){
+      var m = Number(b.dataset.mode);
+      write(current + "_Mode", m, "Switch " + current + " to " + (m === 1 ? "Manual" : "Auto") + "?");
+    });
+  });
+  $("fpStart").addEventListener("click", function(){ write(current + "_ON", 1, "Start " + current + " manually?"); });
+  $("fpStop").addEventListener("click", function(){ write(current + "_ON", 0, "Stop " + current + "?"); });
+  $("fpClose").addEventListener("click", close);
+  $("fpPin").addEventListener("click", function(){
+    pinned = !pinned;
+    $("fpPin").textContent = pinned ? "Unpin" : "Pin";
+    if (pinned) clearTimeout(idleTimer); else armIdle();
+  });
+  fp.addEventListener("pointerdown", armIdle);
+  fp.addEventListener("keydown", armIdle);
+  document.addEventListener("hmi:telemetry", render);
+  document.addEventListener("hmi:page", function(e){ if (e.detail !== "overview") close(); });
+  document.addEventListener("hmi:signout", close);
+})();
+</script>
+<script>
+(function(){
+  var original = {}; // name -> value from the last successful read
+  var edited = {};   // name -> raw input text, touched fields only
+  function $(id){ return document.getElementById(id); }
+
   var groups = {};
   HmiLogic.SETPOINTS.forEach(function(sp){ (groups[sp.group] = groups[sp.group] || []).push(sp); });
-
   Object.keys(groups).forEach(function(groupName){
+    var collapsible = groupName === "Calibration";
     var section = document.createElement("section");
-    section.className = "panel" + (groupName === "4-20mA calibration" ? " collapsed" : "");
-    var collapsible = groupName === "4-20mA calibration";
-    section.innerHTML =
-      '<div class="panel-head"' + (collapsible ? ' id="spCalHead"' : '') + '><h2>' + groupName + '</h2></div>' +
-      '<div class="panel-body"></div>';
+    section.className = "panel" + (collapsible ? " collapsed" : "");
+    section.innerHTML = '<div class="panel-head"' + (collapsible ? ' style="cursor:pointer"' : '') + '><h2></h2>' +
+      (collapsible ? '<span class="muted small">show</span>' : '') + '</div><div class="panel-body"></div>';
+    section.querySelector("h2").textContent = groupName;
     var body = section.querySelector(".panel-body");
     groups[groupName].forEach(function(sp){
       var row = document.createElement("div");
-      row.style.cssText = "display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid var(--border)";
+      row.className = "sp-row";
       row.innerHTML =
-        '<span style="flex:1;font-size:13px">' + sp.label + ' <span class="mono" style="color:var(--ink-3)">(' + sp.name + ')</span></span>' +
-        '<input type="number" min="' + sp.min + '" max="' + sp.max + '" id="sp-input-' + sp.name + '" style="width:110px" class="mono">' +
-        '<span style="width:40px;color:var(--ink-3);font-size:12px">' + sp.unit + '</span>' +
-        '<button class="primary" data-point="' + sp.name + '">Set</button>' +
-        '<span id="sp-result-' + sp.name + '" style="font-size:12px;min-width:80px"></span>';
-      row.querySelector("button").addEventListener("click", function(){
-        var input = document.getElementById("sp-input-" + sp.name);
-        var value = parseInt(input.value, 10);
-        var resultEl = document.getElementById("sp-result-" + sp.name);
-        resultEl.textContent = "Sending...";
-        sendDashCommand("setpoint", { point: sp.name, value: value }, function(resp){
-          resultEl.textContent = resp.ok ? ("OK: " + resp.value) : ("Failed: " + resp.error);
-        });
+        '<label for="sp-input-' + sp.name + '"><span></span> <span class="mono muted small">' + sp.name + '</span></label>' +
+        '<input id="sp-input-' + sp.name + '" type="text" inputmode="numeric" autocomplete="off">' +
+        '<span class="muted small">' + sp.unit + '</span>' +
+        '<div class="err" id="sp-err-' + sp.name + '" hidden></div>';
+      row.querySelector("label span").textContent = sp.label;
+      var input = row.querySelector("input");
+      input.title = "Allowed " + sp.min + "–" + sp.max + " " + sp.unit;
+      input.addEventListener("input", function(){
+        edited[sp.name] = input.value;
+        var v = input.value.trim() === "" ? { ok: true } : HmiLogic.validateNumber(sp, input.value);
+        input.classList.toggle("invalid", !v.ok);
+        input.classList.toggle("changed", v.ok && v.value !== undefined && v.value !== original[sp.name]);
+        $("sp-err-" + sp.name).hidden = v.ok;
+        $("sp-err-" + sp.name).textContent = v.ok ? "" : v.reason;
+        updateReviewBar();
       });
       body.appendChild(row);
     });
-    groupsEl.appendChild(section);
+    $("spGroups").appendChild(section);
     if (collapsible) {
-      document.getElementById("spCalHead").addEventListener("click", function(){ section.classList.toggle("collapsed"); });
+      section.querySelector(".panel-head").addEventListener("click", function(){
+        section.classList.toggle("collapsed");
+        section.querySelector(".panel-head span").textContent = section.classList.contains("collapsed") ? "show" : "hide";
+      });
     }
   });
 
-  function refreshSetpoints(){
-    document.getElementById("spRefreshStatus").textContent = "Reading...";
-    readPoints(HmiLogic.SETPOINTS.map(function(s){ return s.name; }), function(resp){
-      document.getElementById("spRefreshStatus").textContent = resp.ok ? "Updated" : "Failed: " + resp.error;
-      if (!resp.ok) return;
-      Object.keys(resp.values).forEach(function(name){
-        var input = document.getElementById("sp-input-" + name);
-        if (input) input.value = resp.values[name];
-      });
+  function setInputsEnabled(on){
+    HmiLogic.SETPOINTS.forEach(function(sp){ $("sp-input-" + sp.name).disabled = !on; });
+  }
+
+  function fillInputs(){
+    HmiLogic.SETPOINTS.forEach(function(sp){
+      var input = $("sp-input-" + sp.name);
+      input.value = typeof original[sp.name] === "number" ? String(original[sp.name]) : "";
+      input.classList.remove("changed", "invalid");
+      $("sp-err-" + sp.name).hidden = true;
     });
   }
-  document.getElementById("spRefreshBtn").addEventListener("click", refreshSetpoints);
-  document.querySelector('#dash-nav button[data-page="setpoints"]').addEventListener("click", refreshSetpoints);
+
+  function updateReviewBar(){
+    var d = HmiLogic.setpointDiff(original, edited);
+    var n = d.changes.length, bad = d.errors.length;
+    $("reviewBar").hidden = n === 0 && bad === 0;
+    $("reviewCount").textContent = n + (n === 1 ? " change" : " changes") + (bad ? " · " + bad + " invalid" : "");
+    $("spReview").disabled = n === 0 || bad > 0;
+  }
+
+  // afterRead(readError) (optional): runs after the read, e.g. to replace
+  // the status line with a write outcome; readError is set if it failed.
+  function refresh(afterRead){
+    if (!window.hmiIsOperator()) {
+      $("spRefreshStatus").textContent = "Read-only: sign in as operator to read and change setpoints.";
+      setInputsEnabled(false);
+      return;
+    }
+    setInputsEnabled(true);
+    $("spRefreshStatus").textContent = "Reading…";
+    readPoints(HmiLogic.SETPOINTS.map(function(s){ return s.name; }), function(resp){
+      if (!resp.ok) {
+        $("spRefreshStatus").textContent = "Read failed: " + resp.error;
+        if (afterRead) afterRead(resp.error);
+        return;
+      }
+      original = resp.values;
+      edited = {};
+      fillInputs();
+      updateReviewBar();
+      $("spRefreshStatus").textContent = "Values read at " + new Date().toTimeString().slice(0, 8);
+      if (afterRead) afterRead();
+    });
+  }
+
+  $("spReview").addEventListener("click", function(){
+    var d = HmiLogic.setpointDiff(original, edited);
+    if (!d.changes.length || d.errors.length) return;
+    var lines = d.changes.map(function(c){
+      return c.label + " (" + c.name + "): " + (c.from === null ? "—" : c.from) + " → " + c.to;
+    });
+    window.hmiConfirm("Apply " + d.changes.length + (d.changes.length === 1 ? " change" : " changes") + "?\n\n" + lines.join("\n"), "Apply").then(function(ok){
+      if (!ok) return;
+      $("spRefreshStatus").textContent = "Writing…";
+      sendDashBatchWrite(d.changes.map(function(c){ return { point: c.name, value: c.to }; }), function(resp){
+        var r = HmiLogic.batchOutcome(resp);
+        if (r.error) { $("spRefreshStatus").textContent = "Write failed, nothing applied: " + r.error; return; }
+        // ok:true can still carry per-point failures: re-read so the page
+        // shows what the PLC actually holds, then name what did not apply.
+        var failedText = r.failed.map(function(f){ return f.point + " (" + f.error + ")"; }).join(", ");
+        refresh(function(readError){
+          var msg = r.applied ? "Saved." : "Partly saved. Not applied: " + failedText + ".";
+          $("spRefreshStatus").textContent = msg + (readError ? " Re-read failed (" + readError + "), press Reload values."
+            : (r.applied ? "" : " Values below are re-read from the PLC."));
+        });
+      });
+    });
+  });
+  $("spDiscard").addEventListener("click", function(){ edited = {}; fillInputs(); updateReviewBar(); });
+  $("spRefreshBtn").addEventListener("click", function(){ refresh(); });
+  document.addEventListener("hmi:page", function(e){
+    if (e.detail !== "setpoints") return;
+    // Returning to the page must not throw away unsaved edits; the
+    // explicit "Reload values" button still re-reads and discards them.
+    if (Object.keys(edited).length && window.hmiIsOperator()) {
+      setInputsEnabled(true);
+      $("spRefreshStatus").textContent = "Unsaved edits kept. Reload values to discard them.";
+      return;
+    }
+    refresh();
+  });
+  document.addEventListener("hmi:signout", function(){
+    original = {}; edited = {};
+    fillInputs();
+    updateReviewBar();
+    $("spRefreshStatus").textContent = "";
+  });
 })();
 </script>
 
 <script>
 (function(){
+  function $(id){ return document.getElementById(id); }
+
   function renderActiveAlarms(bitmask){
     var faults = HmiLogic.decodeFaultBitmask(bitmask);
-    var list = document.getElementById("active-alarms-list");
-    if (faults.length === 0) { list.innerHTML = '<p style="color:var(--ink-3)">No active alarms.</p>'; return; }
-    list.innerHTML = faults.map(function(f){
-      return '<div style="padding:8px 0;border-bottom:1px solid var(--border)">' +
-        '<strong>#' + f.id + ' ' + f.title + '</strong> — ' + f.zone +
-        ' <span class="mono" style="font-size:11px;color:var(--ink-3)">(' + f.type + ', ' + f.reset + ' reset)</span></div>';
-    }).join('');
+    var list = $("active-alarms-list");
+    if (faults.length === 0) { list.innerHTML = '<p class="muted">No active alarms.</p>'; return; }
+    list.innerHTML = "";
+    faults.forEach(function(f){
+      var row = document.createElement("div");
+      row.className = "alarm-row";
+      var isFault = f.type === "Fault";
+      // Shape + colour + text: never colour alone (ISA-101).
+      row.innerHTML = '<span class="prio ' + (isFault ? "fault" : "alert") + '">' + (isFault ? "■ Fault" : "▲ Alert") + '</span>' +
+        '<span><strong></strong> <span class="muted"></span></span>' +
+        '<span class="mono muted small" style="margin-left:auto"></span>';
+      row.querySelector("strong").textContent = "#" + f.id + " " + f.title;
+      row.querySelector("span.muted").textContent = "· " + f.zone;
+      row.lastElementChild.textContent = f.reset + " reset";
+      list.appendChild(row);
+    });
   }
 
   document.addEventListener("hmi:telemetry", function(e){
     if ("FaultBitmask" in e.detail) renderActiveAlarms(e.detail.FaultBitmask);
   });
-
   document.addEventListener("hmi:alert", function(e){
     var li = document.createElement("li");
-    li.textContent = e.detail;
-    document.getElementById("alarms-history-list").prepend(li);
+    li.textContent = new Date().toTimeString().slice(0, 8) + "  " + e.detail;
+    $("alarms-history-list").prepend(li);
   });
 
-  function wireAlarmAction(buttonId, action){
-    document.getElementById(buttonId).addEventListener("click", function(){
-      document.getElementById("alarm-action-result").textContent = "Sending...";
-      sendDashCommand(action, {}, function(resp){
-        document.getElementById("alarm-action-result").textContent = resp.ok ? "OK" : ("Failed: " + resp.error);
+  function wireAlarmAction(buttonId, action, message){
+    $(buttonId).addEventListener("click", function(){
+      window.hmiConfirm(message).then(function(ok){
+        if (!ok) return;
+        $("alarm-action-result").textContent = "Sending…";
+        sendDashCommand(action, {}, function(resp){
+          $("alarm-action-result").textContent = resp.ok ? "Done." : ("Failed: " + resp.error);
+        });
       });
     });
   }
-  wireAlarmAction("stop-btn", "stop");
-  wireAlarmAction("resume-btn", "resume");
-  wireAlarmAction("clear-fault-btn", "clear_fault");
+  wireAlarmAction("stop-btn", "stop", "Stop the process now (remote stop)? All pumps stop.");
+  wireAlarmAction("resume-btn", "resume", "Resume the process (clear remote stop)?");
+  wireAlarmAction("clear-fault-btn", "clear_fault", "Clear latched faults? Faults whose condition is still present will trip again.");
+
+  // Viewer tier: disable rather than let a confirmed click fail with not_operator.
+  document.addEventListener("hmi:page", function(e){
+    if (e.detail !== "alarms") return;
+    var op = window.hmiIsOperator();
+    ["stop-btn", "resume-btn", "clear-fault-btn"].forEach(function(id){ $(id).disabled = !op; });
+    $("alarmReadOnly").hidden = op;
+  });
+  document.addEventListener("hmi:signout", function(){
+    $("alarm-action-result").textContent = "";
+    $("alarms-history-list").innerHTML = "";
+    $("active-alarms-list").innerHTML = '<p class="muted">No active alarms.</p>';
+  });
 })();
 </script>
 
@@ -677,18 +1114,36 @@
     { point: "LTE_Disabled", label: "Disable LTE" },
   ];
   var toggleState = {};
+  var op = false; // operator tier, refreshed on every hmi:page "system"
+  // A toggle whose state has not been read shows "state unknown" and stays
+  // disabled: without the state there is no safe direction to toggle.
   function renderToggles(){
     var container = document.getElementById("transportToggles");
     container.innerHTML = "";
     TOGGLES.forEach(function(tg){
       var btn = document.createElement("button");
-      btn.className = "primary";
+      btn.className = "action";
+      btn.type = "button";
+      if (typeof toggleState[tg.point] !== "number") {
+        btn.textContent = tg.label.replace("Disable ", "") + ": state unknown";
+        btn.disabled = true;
+        container.appendChild(btn);
+        return;
+      }
       var isOn = toggleState[tg.point] === 1;
-      btn.textContent = tg.label + (isOn ? " (currently disabled)" : "");
+      var label = isOn ? tg.label.replace("Disable", "Enable") : tg.label;
+      btn.textContent = label + (isOn ? " (currently disabled)" : "");
+      btn.disabled = !op;
       btn.addEventListener("click", function(){
-        if (!confirm(tg.label + "? Confirm this transport is not the only one keeping the device reachable.")) return;
-        sendDashCommand("coil", { point: tg.point, value: isOn ? 0 : 1 }, function(resp){
-          if (resp.ok) { toggleState[tg.point] = isOn ? 0 : 1; renderToggles(); }
+        var msg = isOn ? label + "?" : label + "? Make sure another transport is keeping the device reachable.";
+        window.hmiConfirm(msg).then(function(ok){
+          if (!ok) return;
+          var resultEl = document.getElementById("transportResult");
+          resultEl.textContent = "Sending…";
+          sendDashCommand("coil", { point: tg.point, value: isOn ? 0 : 1 }, function(resp){
+            if (resp.ok) { toggleState[tg.point] = isOn ? 0 : 1; renderToggles(); resultEl.textContent = "Done."; }
+            else resultEl.textContent = "Failed: " + (resp.error || "unknown");
+          });
         });
       });
       container.appendChild(btn);
@@ -699,14 +1154,30 @@
   var dosingModeState = {};
   function renderDosingMode(){
     var el = document.getElementById("dosingModeControl");
-    var isAuto = dosingModeState.B14 === 1;
     el.innerHTML = "";
     var btn = document.createElement("button");
-    btn.className = "primary";
-    btn.textContent = "Mode: " + (isAuto ? "Auto (by NO3 meter)" : "Manual (SP_F01)") + " — click to switch";
+    btn.className = "action";
+    btn.type = "button";
+    if (typeof dosingModeState.B14 !== "number") {
+      btn.textContent = "Mode: unknown";
+      btn.disabled = true;
+      el.appendChild(btn);
+      return;
+    }
+    var isAuto = dosingModeState.B14 === 1; // B14: 1 = auto (by NO3 meter), 0 = manual
+    btn.textContent = "Mode: " + (isAuto ? "Auto (by NO3 meter)" : "Manual (SP_F01)") + " · switch";
+    btn.disabled = !op;
     btn.addEventListener("click", function(){
-      sendDashCommand("coil", { point: "B14", value: isAuto ? 0 : 1 }, function(resp){
-        if (resp.ok) { dosingModeState.B14 = isAuto ? 0 : 1; renderDosingMode(); }
+      window.hmiConfirm("Switch dosing to " + (isAuto ? "Manual (fixed SP_F01 flow)" : "Auto (by NO3 meter)") + "?").then(function(ok){
+        if (!ok) return;
+        var resultEl = document.getElementById("dosingModeResult");
+        resultEl.textContent = "Sending…";
+        sendDashCommand("coil", { point: "B14", value: isAuto ? 0 : 1 }, function(resp){
+          if (resp.ok) {
+            dosingModeState.B14 = isAuto ? 0 : 1; renderDosingMode(); resultEl.textContent = "Done.";
+            if (window.hmiSetCoil) window.hmiSetCoil("B14", isAuto ? 0 : 1);
+          } else resultEl.textContent = "Failed: " + (resp.error || "unknown");
+        });
       });
     });
     el.appendChild(btn);
@@ -715,22 +1186,58 @@
 
   function refreshSystemReads(){
     readPoints(["Ethernet_Disabled", "WiFi_Disabled", "LTE_Disabled", "B14"], function(resp){
-      if (!resp.ok) return;
+      if (!resp.ok) {
+        document.getElementById("transportResult").textContent = "Could not read transport and dosing state: " + (resp.error || "unknown");
+        return;
+      }
       Object.assign(toggleState, resp.values);
       Object.assign(dosingModeState, resp.values);
       renderToggles();
       renderDosingMode();
     });
   }
-  document.querySelector('#dash-nav button[data-page="system"]').addEventListener("click", refreshSystemReads);
-  document.querySelector('#dash-nav button[data-page="system"]').addEventListener("click", refreshMailReads);
+
+  // Viewer tier must never see an enabled control that silently fails
+  // (same pattern as the Simulation panel's setControlsEnabled).
+  function setSystemControlsEnabled(on){
+    document.getElementById("rebootBtn").disabled = !on;
+    document.getElementById("sendDailyEmailNowBtn").disabled = !on;
+    Object.keys(MAIL_SLOTS).forEach(function(slotKey){
+      mailInputElFor(slotKey).disabled = !on;
+      mailButtonElFor(slotKey).disabled = !on;
+    });
+    document.getElementById("sysReadOnly").hidden = on;
+    renderToggles();
+    renderDosingMode();
+  }
+  document.addEventListener("hmi:page", function(e){
+    if (e.detail !== "system") return;
+    op = window.hmiIsOperator();
+    setSystemControlsEnabled(op);
+    if (op) { refreshSystemReads(); refreshMailReads(); }
+  });
+  // Sign-out: forget the previous session's device state.
+  document.addEventListener("hmi:signout", function(){
+    toggleState = {}; dosingModeState = {}; op = false;
+    ["transportStatus", "transportResult", "dosingModeResult", "rebootResult", "sendDailyEmailResult"].forEach(function(id){
+      document.getElementById(id).textContent = "";
+    });
+    Object.keys(MAIL_SLOTS).forEach(function(slotKey){
+      mailInputElFor(slotKey).value = "";
+      document.getElementById("mailResult-" + slotKey).textContent = "";
+    });
+    renderToggles();
+    renderDosingMode();
+  });
 
   document.getElementById("rebootBtn").addEventListener("click", function(){
-    if (!confirm("Reboot the PLC now? This restarts the board immediately.")) return;
-    var resultEl = document.getElementById("rebootResult");
-    resultEl.textContent = "Sending...";
-    sendDashCommand("coil", { point: "System_Reboot", value: 1 }, function(resp){
-      resultEl.textContent = resp.ok ? "Reboot triggered" : ("Failed: " + resp.error);
+    window.hmiConfirm("Reboot the PLC now? The process stops while it restarts (about 30 s).", "Reboot").then(function(ok){
+      if (!ok) return;
+      var resultEl = document.getElementById("rebootResult");
+      resultEl.textContent = "Sending…";
+      sendDashCommand("coil", { point: "System_Reboot", value: 1 }, function(resp){
+        resultEl.textContent = resp.ok ? "Reboot triggered" : ("Failed: " + resp.error);
+      });
     });
   });
 
@@ -756,6 +1263,9 @@
   function mailInputElFor(slotKey){
     return slotKey === "recipient" ? document.getElementById("mailRecipient") : document.getElementById("mail-input-" + slotKey);
   }
+  function mailButtonElFor(slotKey){
+    return slotKey === "recipient" ? document.querySelector('[data-mail-slot="recipient"]') : document.getElementById("mail-set-" + slotKey);
+  }
 
   // Read-back for all 6 mail slots: reconstructs the ordered 32-register
   // array each slot's regPrefix+0..regPrefix+31 points to (resp.values is a
@@ -778,24 +1288,26 @@
   function setMailSlot(slotKey, inputEl, resultEl){
     var slotDef = MAIL_SLOTS[slotKey];
     var email = inputEl.value.trim();
-    if (!email && !confirm("Clear this recipient? Alerts will no longer be sent to it.")) return;
+    if (!email) {
+      window.hmiConfirm("Clear this recipient? Emails will no longer be sent to it.", "Clear").then(function(ok){
+        if (ok) writeMailSlot(slotDef, "", resultEl);
+      });
+      return;
+    }
+    writeMailSlot(slotDef, email, resultEl);
+  }
+
+  function writeMailSlot(slotDef, email, resultEl){
     var regs;
     try { regs = HmiLogic.packEmailToRegisters(email, slotDef.count); }
     catch (err) { resultEl.textContent = "Too long"; return; }
-    resultEl.textContent = "Writing...";
-    var remaining = slotDef.count;
-    var failed = false;
-    regs.forEach(function(value, i){
-      sendDashCommand("setpoint", { point: slotDef.regPrefix + i, value: value }, function(resp){
-        if (!resp.ok) failed = true;
-        remaining--;
-        if (remaining === 0) {
-          if (failed) { resultEl.textContent = "Failed writing registers"; return; }
-          sendDashCommand("coil", { point: slotDef.applyPoint, value: 1 }, function(applyResp){
-            resultEl.textContent = applyResp.ok ? "Saved" : ("Failed: " + applyResp.error);
-          });
-        }
-      });
+    resultEl.textContent = "Saving...";
+    var writes = regs.map(function(value, i){ return { point: slotDef.regPrefix + i, value: value }; });
+    writes.push({ point: slotDef.applyPoint, value: 1 });
+    sendDashBatchWrite(writes, function(resp){
+      var r = HmiLogic.batchOutcome(resp);
+      resultEl.textContent = r.error ? "Failed: " + r.error
+        : r.applied ? "Saved" : "Partly saved, " + r.failed.length + " register(s) failed. Set it again.";
     });
   }
 
@@ -807,11 +1319,11 @@
   for (var s = 0; s < 5; s++) {
     (function(slotKey, slotIndex){
       var row = document.createElement("div");
-      row.style.cssText = "display:flex;gap:10px;align-items:center;margin-bottom:10px";
+      row.className = "row-line";
       row.innerHTML =
         '<label style="font-size:13px;min-width:160px">Alert recipient ' + (slotIndex + 1) + '</label>' +
         '<input type="email" style="flex:1;max-width:300px" id="mail-input-' + slotKey + '">' +
-        '<button class="primary">Set</button>' +
+        '<button type="button" class="primary" id="mail-set-' + slotKey + '">Set</button>' +
         '<span id="mailResult-' + slotKey + '" style="font-size:12px"></span>';
       row.querySelector("button").addEventListener("click", function(){
         setMailSlot(slotKey, document.getElementById("mail-input-" + slotKey), document.getElementById("mailResult-" + slotKey));
@@ -825,6 +1337,138 @@
     resultEl.textContent = "Sending...";
     sendDashCommand("coil", { point: "Send_Daily_Email_Now", value: 1 }, function(resp){
       resultEl.textContent = resp.ok ? "Triggered" : ("Failed: " + resp.error);
+    });
+  });
+})();
+</script>
+
+<script>
+(function(){
+  function $(id){ return document.getElementById(id); }
+  var rowsEl = $("simRows");
+
+  HmiLogic.SIM_POINTS.forEach(function(p){
+    var row = document.createElement("div");
+    row.className = "sim-row";
+    row.id = "simrow-" + p.name;
+    var entry = p.kind === "digital"
+      ? '<select id="simval-' + p.name + '" aria-label="Simulated value"></select>'
+      : '<input id="simval-' + p.name + '" type="text" inputmode="numeric" aria-label="Simulated value" placeholder="' + p.min + '–' + p.max + ' ' + p.unit + '">';
+    row.innerHTML =
+      '<div><span></span> <span class="mono muted small">' + p.name + '</span></div>' +
+      '<div class="small">Real: <span class="mono" id="simreal-' + p.name + '">—</span></div>' +
+      entry +
+      '<button type="button" class="action" id="simbtn-' + p.name + '">Simulate</button>' +
+      '<button type="button" class="secondary" id="simset-' + p.name + '" hidden>Set value</button>';
+    row.querySelector("div span").textContent = p.label;
+    if (p.kind === "digital") {
+      // Per-point labels: LS0_low is active-low (1 = level OK, 0 = LOW).
+      var sel = row.querySelector("select");
+      p.options.forEach(function(o){
+        var opt = document.createElement("option");
+        opt.value = String(o.value); opt.textContent = o.label;
+        sel.appendChild(opt);
+      });
+    }
+    rowsEl.appendChild(row);
+    $("simbtn-" + p.name).addEventListener("click", function(){ toggle(p); });
+    $("simset-" + p.name).addEventListener("click", function(){ setValue(p); });
+  });
+
+  function simulatedNow(name){
+    var t = window.__hmiLastTelemetry || {};
+    return HmiLogic.simPointsFromMask(t.Sim_Mask || 0).indexOf(name) >= 0;
+  }
+  function readEntry(p){
+    var def = p.kind === "digital" ? { min: 0, max: 1 } : p;
+    return HmiLogic.validateNumber(def, $("simval-" + p.name).value);
+  }
+  function operatorOrExplain(){
+    if (window.hmiIsOperator()) return true;
+    $("simResult").textContent = "Read-only: sign in as operator to simulate values.";
+    return false;
+  }
+
+  // Global constraint (Review Focus): a viewer-tier login must never see an
+  // enabled control that silently fails - disable the sim controls outright
+  // rather than only rejecting the click.
+  function setControlsEnabled(on){
+    HmiLogic.SIM_POINTS.forEach(function(p){
+      $("simval-" + p.name).disabled = !on;
+      $("simbtn-" + p.name).disabled = !on;
+      $("simset-" + p.name).disabled = !on;
+    });
+  }
+  document.addEventListener("hmi:page", function(e){
+    if (e.detail !== "system") return;
+    var op = window.hmiIsOperator();
+    setControlsEnabled(op);
+    if (!op) $("simResult").textContent = "Read-only: sign in as operator to simulate values.";
+  });
+
+  // ok:true replies still carry per-point results; a failed entry means
+  // only part of the batch was applied (e.g. enabled with the old value).
+  function simBatchText(resp, okText, failPrefix){
+    var r = HmiLogic.batchOutcome(resp);
+    if (r.error) return failPrefix + r.error;
+    if (r.applied) return okText;
+    return "Partly applied. Not applied: " + r.failed.map(function(f){ return f.point + " (" + f.error + ")"; }).join(", ") +
+      ". Check the SIM tag and value above; stop simulating if it is wrong.";
+  }
+
+  function toggle(p){
+    if (!operatorOrExplain()) return;
+    if (simulatedNow(p.name)) {
+      // Back to the real value - the safe direction, no confirm needed.
+      sendDashCommand("coil", { point: p.name + "_Sim", value: 0 }, function(resp){
+        $("simResult").textContent = resp.ok ? p.label + ": back to the real value." : ("Failed: " + resp.error);
+      });
+      return;
+    }
+    var v = readEntry(p);
+    if (!v.ok) { $("simResult").textContent = p.label + ": " + v.reason; return; }
+    var real = HmiLogic.realValue(p.name, window.__hmiLastTelemetry || {});
+    window.hmiConfirm(HmiLogic.simConfirmMessage(p.name, v.value, real), "Simulate").then(function(ok){
+      if (!ok) return;
+      $("simResult").textContent = "Sending…";
+      sendDashBatchWrite(HmiLogic.simEnableWrites(p.name, v.value), function(resp){
+        $("simResult").textContent = simBatchText(resp, p.label + " is now simulated.", "Failed, nothing changed: ");
+      });
+    });
+  }
+
+  function setValue(p){
+    if (!operatorOrExplain()) return;
+    var v = readEntry(p);
+    if (!v.ok) { $("simResult").textContent = p.label + ": " + v.reason; return; }
+    var real = HmiLogic.realValue(p.name, window.__hmiLastTelemetry || {});
+    window.hmiConfirm(HmiLogic.simConfirmMessage(p.name, v.value, real), "Set value").then(function(ok){
+      if (!ok) return;
+      sendDashBatchWrite([{ point: p.name + "_SimValue", value: v.value }], function(resp){
+        $("simResult").textContent = simBatchText(resp, p.label + " simulated value updated.", "Failed: ");
+      });
+    });
+  }
+
+  document.addEventListener("hmi:telemetry", function(e){
+    var t = e.detail;
+    var sims = HmiLogic.simPointsFromMask(t.Sim_Mask || 0);
+    HmiLogic.SIM_POINTS.forEach(function(p){
+      var real = HmiLogic.realValue(p.name, t);
+      $("simreal-" + p.name).textContent = real === null ? "—" : HmiLogic.simValueText(p.name, real);
+      var on = sims.indexOf(p.name) >= 0;
+      $("simbtn-" + p.name).textContent = on ? "Stop simulating" : "Simulate";
+      $("simset-" + p.name).hidden = !on;
+      $("simrow-" + p.name).classList.toggle("is-sim-row", on);
+    });
+  });
+  document.addEventListener("hmi:signout", function(){
+    $("simResult").textContent = "";
+    HmiLogic.SIM_POINTS.forEach(function(p){
+      $("simreal-" + p.name).textContent = "—";
+      $("simbtn-" + p.name).textContent = "Simulate";
+      $("simset-" + p.name).hidden = true;
+      $("simrow-" + p.name).classList.remove("is-sim-row");
     });
   });
 })();
