@@ -704,8 +704,8 @@
   var coils = {};             // P*_ON / P*_Mode / B14 from the operator bulk read
   var PUMPS = ["P1", "P2", "P3", "P4", "DP1"];
   var rings = {
-    LT01: HmiLogic.createRing(120), LT02: HmiLogic.createRing(120),
-    NO3: HmiLogic.createRing(120), FLOW: HmiLogic.createRing(120)
+    LT01: HmiLogic.createRing(1440), LT02: HmiLogic.createRing(1440),
+    NO3: HmiLogic.createRing(1440), FLOW: HmiLogic.createRing(1440)
   };
 
   function $(id){ return document.getElementById(id); }
@@ -786,8 +786,8 @@
   }
 
   function newRings(){
-    return { LT01: HmiLogic.createRing(120), LT02: HmiLogic.createRing(120),
-             NO3: HmiLogic.createRing(120), FLOW: HmiLogic.createRing(120) };
+    return { LT01: HmiLogic.createRing(1440), LT02: HmiLogic.createRing(1440),
+             NO3: HmiLogic.createRing(1440), FLOW: HmiLogic.createRing(1440) };
   }
   // Sign-out: drop the previous session's coils, trends and shown values.
   function resetOverview(){
