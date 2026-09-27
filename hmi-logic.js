@@ -131,6 +131,11 @@
     106: 'P1 ON (pump tank 1)', 108: 'TAYA 2 min-level delay', 110: 'P2 ON (pump tank 2)',
   };
   function stepName(step) { return STEP_NAMES[step] || ('Step ' + step); }
+  // Plain-language step for the mimic banner: which way water is moving.
+  const STEP_FLOW = {
+    106: 'P1 transferring TAYA 1 → TAYA 2', 110: 'P2 transferring TAYA 2 → TAYA 1',
+  };
+  function stepDescription(step) { return STEP_FLOW[step] || stepName(step); }
   // "106-L" / "106-S" - B13 large/small. At 100/102 it's the NEXT half's type.
   function stepLabel(step, cycleIsLarge) {
     if (typeof step !== 'number') return '—';
@@ -299,7 +304,7 @@
     Inlet_Fault: 0, Sugar_Fault: 0, DP1_Fault: 0, P3_Fault: 0, Force_B14_Manual: 0,
     Emergency_Stop: 0, C_10: 7, C_11: 4, C_12: 3, C_13: 2.1, C_14: 1.9,
     Step: 106, Cycle_Type: 1, FT101_Flow_Lh: 1820, Dosing_Flow: 350, NO3_Inlet_Avg: 418,
-    Inlet_Total_L: 125400, DP1_Total_Strokes: 88210, Sim_Mask: 0,
+    Inlet_Total_L: 125400, DP1_Total_Strokes: 88210, Sim_Mask: 0, SD_OK: 1,
     ActiveTransport: 1, WiFi_Connected: 1, WiFi_RSSI: -61,
   };
   const DEMO_FRAMES = {
@@ -336,17 +341,27 @@
       imageText: boot.image === 'pending_verify' ? 'New update, not yet confirmed' : 'Confirmed',
       transportText: TRANSPORT_NAMES[boot.transport] || 'Unknown',
       wifiText: boot.wifi ? 'WiFi connected' : 'WiFi not connected',
+      sd: sdCardStatus(boot.sd_ok),
       bootedAt: hasTime ? new Date((boot.t - upS) * 1000) : null,
     };
+  }
+
+  // SD_OK telemetry / sd_ok boot key (firmware v9+): 1 = card mounted at
+  // boot. Missing means no CSV logs and no daily digest attachments.
+  // null = key absent (older firmware), so the HMI shows nothing.
+  function sdCardStatus(v) {
+    if (v === 1) return { text: 'OK', abnormal: false };
+    if (v === 0) return { text: 'missing or failed (no data logging)', abnormal: true };
+    return null;
   }
 
   const HmiLogic = {
     FAULTS, decodeFaultBitmask, SETPOINTS, scaleTelemetryValue,
     packEmailToRegisters, unpackRegistersToEmail,
-    STEP_NAMES, stepName, stepLabel,
+    STEP_NAMES, stepName, stepLabel, stepDescription,
     SIM_POINTS, simPointsFromMask, simEnableWrites, realValue, simValueText, simConfirmMessage,
     validateNumber, setpointDiff, pumpState, dosingText, batchOutcome, alarmSummary,
-    createRing, sparklinePath, DEMO_FRAMES, describeBoot,
+    createRing, sparklinePath, DEMO_FRAMES, describeBoot, sdCardStatus,
   };
 
   if (typeof module !== 'undefined' && module.exports) {
