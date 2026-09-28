@@ -82,6 +82,12 @@
     { name: 'SP_L2_20mA', group: 'Calibration', label: 'LT02 raw ADC at 20mA', unit: 'counts', min: 0, max: 4095 },
     { name: 'SP_N_4mA', group: 'Calibration', label: 'AIT01_NO3 raw ADC at 4mA', unit: 'counts', min: 0, max: 4095 },
     { name: 'SP_N_20mA', group: 'Calibration', label: 'AIT01_NO3 raw ADC at 20mA', unit: 'counts', min: 0, max: 4095 },
+    { name: 'SP_L1_Eng4', group: 'Calibration', label: 'TAYA 1 level at 4 mA', unit: 'cm', min: 0, max: 400 },
+    { name: 'SP_L1_Eng20', group: 'Calibration', label: 'TAYA 1 level at 20 mA', unit: 'cm', min: 1, max: 1000 },
+    { name: 'SP_L2_Eng4', group: 'Calibration', label: 'TAYA 2 level at 4 mA', unit: 'cm', min: 0, max: 400 },
+    { name: 'SP_L2_Eng20', group: 'Calibration', label: 'TAYA 2 level at 20 mA', unit: 'cm', min: 1, max: 1000 },
+    { name: 'SP_N_Eng4', group: 'Calibration', label: 'NO3 at 4 mA', unit: '0.1 ppm', min: 0, max: 20000 },
+    { name: 'SP_N_Eng20', group: 'Calibration', label: 'NO3 at 20 mA', unit: '0.1 ppm', min: 1, max: 20000 },
   ];
 
   // Telemetry (mqtt_client.cpp's publishTelemetry()) fixed-point scaling.
@@ -300,12 +306,13 @@
   const DEMO_BASE = {
     System_Switch: 1, Reset_Inactive_Alarms: 0, Q_Stop: 1, P1_OL: 0, P2_OL: 0, P3_OL: 0,
     P4_OL: 0, P5_OL: 0, FT101_P: 0, LS0_low: 1, LT01: 104, LT02: 82, AIT01_NO3: 421,
-    FT101_accumulated: 182, ActiveFaultCount: 0, FaultBitmask: 0, TAYA_Fault: 0,
+    FT101_accumulated: 182, ActiveFaultCount: 0, FaultBitmask: 0, HMI_Run: 1, TAYA_Fault: 0,
     Inlet_Fault: 0, Sugar_Fault: 0, DP1_Fault: 0, P3_Fault: 0, Force_B14_Manual: 0,
     Emergency_Stop: 0, C_10: 7, C_11: 4, C_12: 3, C_13: 2.1, C_14: 1.9,
     Step: 106, Cycle_Type: 1, FT101_Flow_Lh: 1820, Dosing_Flow: 350, NO3_Inlet_Avg: 418,
     Inlet_Total_L: 125400, DP1_Total_Strokes: 88210, Sim_Mask: 0, SD_OK: 1,
-    ActiveTransport: 1, WiFi_Connected: 1, WiFi_RSSI: -61,
+    ActiveTransport: 1, WiFi_Connected: 1, WiFi_RSSI: -61, Loop_Max_ms: 24,
+    LT01_ADC: 1464, LT01_mA: 16.64, LT02_ADC: 1256, LT02_mA: 14.56, AIT01_NO3_ADC: 537, AIT01_NO3_mA: 7.37,
   };
   const DEMO_FRAMES = {
     normal: Object.assign({}, DEMO_BASE),
@@ -355,6 +362,324 @@
     return null;
   }
 
+  // ---- SD-card history (spec 2026-09-27-web-hmi-trends-history-design) ----
+  // Rows as the PLC sends them: [t, lt01, lt02, no3, flow, dosing, step, cycle];
+  // with mm (min/max buckets) each value is [min, max] or null.
+  const HIST_KEYS = ['lt01', 'lt02', 'no3', 'flow', 'dosing'];
+
+  function historyWindow(hours, nowMs) {
+    const to = Math.floor(nowMs / 1000);
+    return { from: to - hours * 3600, to };
+  }
+
+  // Local date 'YYYY-MM-DD' + 'HH:MM' in the browser's time zone.
+  function historyWindowAt(dateStr, timeStr, hours) {
+    const d = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateStr || '');
+    const t = /^(\d{2}):(\d{2})$/.exec(timeStr || '');
+    if (!d || !t) return null;
+    const start = new Date(+d[1], +d[2] - 1, +d[3], +t[1], +t[2], 0, 0);
+    if (isNaN(start.getTime())) return null;
+    const from = Math.floor(start.getTime() / 1000);
+    return { from, to: from + hours * 3600 };
+  }
+
+  function historyStepSeconds(windowS) {
+    if (windowS <= 7200) return 10;
+    if (windowS <= 28800) return 30;
+    return 60;
+  }
+
+  function createHistoryAssembler(id) {
+    const fast = [], events = [], seen = new Set();
+    let done = false, error = null, endSeq = null, stepS = null, mm = false;
+    return {
+      add(chunk) {
+        if (!chunk || chunk.id !== id || done || typeof chunk.seq !== 'number') return false;
+        if (seen.has(chunk.seq)) return false;
+        seen.add(chunk.seq);
+        if (chunk.kind === 'fast') {
+          stepS = chunk.step_s; mm = !!chunk.mm;
+          (chunk.rows || []).forEach(r => fast.push(r));
+        } else if (chunk.kind === 'events') {
+          (chunk.rows || []).forEach(r => events.push(r));
+        } else if (chunk.kind === 'end') {
+          done = true; error = chunk.error || null; endSeq = chunk.seq;
+        }
+        return true;
+      },
+      state() {
+        let gap = false;
+        if (done) for (let s = 0; s < endSeq; s++) if (!seen.has(s)) { gap = true; break; }
+        return { done, error, gap, chunks: seen.size, stepS, mm };
+      },
+      rows() { return fast.slice().sort((a, b) => a[0] - b[0]); },
+      events() {
+        return events.slice().sort((a, b) => a[0] - b[0])
+          .map(r => ({ t: r[0], tag: r[1], value: r[2], kind: r[3] }));
+      },
+    };
+  }
+
+  function historyColumns(rows, mm) {
+    const sorted = rows.slice().sort((a, b) => a[0] - b[0]);
+    const out = { x: [], step: [], cycle: [] };
+    HIST_KEYS.forEach(k => { out[k] = { v: [], lo: [], hi: [] }; });
+    sorted.forEach(r => {
+      out.x.push(r[0]);
+      HIST_KEYS.forEach((k, i) => {
+        const cell = r[1 + i];
+        let lo = null, hi = null;
+        if (mm) { if (Array.isArray(cell)) { lo = cell[0]; hi = cell[1]; } }
+        else if (typeof cell === 'number') { lo = hi = cell; }
+        out[k].lo.push(lo); out[k].hi.push(hi);
+        out[k].v.push(lo === null || hi === null ? null : (lo + hi) / 2);
+      });
+      out.step.push(r[6]); out.cycle.push(r[7]);
+    });
+    return out;
+  }
+
+  // liveRow is a plain row (values, not [min,max]). Returns a new array.
+  function historyAppendLive(rows, mm, stepS, liveRow, windowS) {
+    const out = rows.filter(r => r[0] > liveRow[0] - windowS);
+    if (!mm) { out.push(liveRow.slice()); return out; }
+    const start = liveRow[0] - (liveRow[0] % stepS);
+    const last = out[out.length - 1];
+    if (last && last[0] === start) {
+      const merged = last.slice();
+      for (let i = 1; i <= 5; i++) {
+        const v = liveRow[i];
+        if (typeof v !== 'number') continue;
+        merged[i] = Array.isArray(merged[i]) ? [Math.min(merged[i][0], v), Math.max(merged[i][1], v)] : [v, v];
+      }
+      merged[6] = liveRow[6]; merged[7] = liveRow[7];
+      out[out.length - 1] = merged;
+    } else {
+      const fresh = [start];
+      for (let i = 1; i <= 5; i++) fresh.push(typeof liveRow[i] === 'number' ? [liveRow[i], liveRow[i]] : null);
+      fresh.push(liveRow[6], liveRow[7]);
+      out.push(fresh);
+    }
+    return out;
+  }
+
+  function telemetryToHistoryRow(t, nowMs) {
+    const num = v => (typeof v === 'number' ? v : null);
+    const no3 = typeof t.AIT01_NO3 === 'number' ? scaleTelemetryValue('AIT01_NO3', t.AIT01_NO3) : null;
+    return [Math.floor(nowMs / 1000), num(t.LT01), num(t.LT02), no3, num(t.FT101_Flow_Lh), num(t.Dosing_Flow),
+            num(t.Step), t.Cycle_Type === 1 ? 'L' : 'S'];
+  }
+
+  function historyEventText(ev) {
+    switch (ev.kind) {
+      case 'alert': return ev.value;
+      case 'SP': return ev.tag + ' set to ' + ev.value;
+      case 'B14': return 'Dosing mode set to ' + (ev.value === '1' ? 'auto' : 'manual');
+      case 'sim': return ev.tag + ' changed to ' + ev.value + ' (simulated)';
+      default: return ev.tag + ' changed to ' + ev.value;
+    }
+  }
+
+  const HISTORY_ERRORS = {
+    sd_missing: 'SD card missing on the PLC',
+    clock_not_set: 'Clock not set on the PLC',
+    bad_window: "That time window isn't valid",
+    bad_request: 'The PLC rejected the request',
+    ota_in_progress: 'The PLC is updating, try again shortly',
+    sd_error: 'The PLC could not read its SD card',
+    timeout: "PLC didn't respond",
+    not_operator: 'Sign in as operator to load history',
+    dash_not_connected: 'Not connected',
+    cancelled: 'Interrupted by another view, reloading…',
+  };
+  function historyErrorText(code) { return HISTORY_ERRORS[code] || ('Failed: ' + code); }
+
+  // True when a finished history job should be reloaded automatically
+  // (same window as before) rather than just shown as failed: the PLC only
+  // runs one history job at a time, so opening Trends and Alarms in quick
+  // succession makes the firmware end whichever job was already running
+  // with error "cancelled". That is expected, not an operator-facing
+  // failure, so the page silently reloads instead of leaving a dead
+  // "Failed: cancelled" status and a permanently-disabled live extension.
+  // A job that is merely still in progress (state.done === false) is NOT
+  // a reload case - that is handled by resuming its watchdog instead
+  // (see index.html), so a legitimately slow load isn't restarted from
+  // scratch just because the page was hidden and shown again.
+  function historyNeedsReload(state) {
+    return !!(state && state.done && state.error === 'cancelled');
+  }
+
+  // Whether a page's history job should still count as "busy" for the
+  // purpose of holding another page back from starting a job of its own
+  // (the PLC only runs one at a time). `busy` is the page's own flag (set
+  // true when it starts a load, false when it ends for any reason);
+  // `ageMs` is how long it's been since that job's last chunk arrived.
+  // A silently dropped job (e.g. link loss, final review #2) never sets
+  // `busy` false on its own while the page is hidden - its watchdog is
+  // stopped - so without this staleness check `busy` alone could stay
+  // true forever and block the other page's loads permanently. 10 s
+  // matches the watchdog's own dead-job timeout.
+  function historyStillBusy(busy, ageMs) {
+    return !!busy && ageMs < 10000;
+  }
+
+  // Neutral grays by step (ISA-101: no alarm colours).
+  const STEP_SHADES = { 100: '#b3b8bb', 102: '#e3e5e6', 104: '#c8cccd', 106: '#8f989c', 108: '#c8cccd', 110: '#6f787c' };
+  function stepShade(step) { return STEP_SHADES[step] || '#d5d8d9'; }
+
+  // Canned history for ?demo= (screenshots without a broker).
+  function demoHistoryChunks(id, from, to, series) {
+    const stepS = historyStepSeconds(to - from), mm = stepS > 10;
+    const chunks = [];
+    let seq = 0;
+    if (series.indexOf('fast') >= 0) {
+      let rows = [];
+      for (let t = from - (from % stepS); t < to; t += stepS) {
+        if (t < from) continue;
+        const ph = (t % 3000) / 3000;
+        const lt01 = Math.round(60 + 60 * Math.abs(Math.sin(Math.PI * ph)));
+        const lt02 = Math.round(170 - lt01);
+        const no3 = Math.round((40 + 4 * Math.sin(t / 5000)) * 10) / 10;
+        const flow = 1800 + Math.round(40 * Math.sin(t / 700));
+        const step = ph < 0.45 ? 106 : ph < 0.5 ? 104 : ph < 0.95 ? 110 : 108;
+        const vals = [lt01, lt02, no3, flow, 350];
+        const row = [t].concat(mm ? vals.map(v => [v - 1, v + 1]) : vals).concat([step, 'L']);
+        if (t % 14400 < stepS) row[1] = null; // one sensor gap per 4 h
+        rows.push(row);
+        if (rows.length === 20) { chunks.push({ id, seq: seq++, kind: 'fast', step_s: stepS, mm, rows }); rows = []; }
+      }
+      if (rows.length) chunks.push({ id, seq: seq++, kind: 'fast', step_s: stepS, mm, rows });
+    }
+    if (series.indexOf('events') >= 0) {
+      const span = to - from;
+      chunks.push({ id, seq: seq++, kind: 'events', rows: [
+        [from + Math.floor(span * 0.2), 'SP_L5', '75', 'SP'],
+        [from + Math.floor(span * 0.5), 'ALERT', 'LT01_Low_level active', 'alert'],
+        [from + Math.floor(span * 0.8), 'B14', '1', 'B14'],
+      ] });
+    }
+    chunks.push({ id, seq: seq++, kind: 'end', done: true });
+    return chunks;
+  }
+
+  // "Send Daily Email Now" for a chosen day (firmware v9 Email_Req_* points,
+  // Hreg 190-192). 0/0/0 = yesterday. Date first, coil last: the firmware
+  // latches the date when it sees the coil.
+  function emailRequestWrites(dateStr) {
+    let y = 0, m = 0, d = 0;
+    if (dateStr) {
+      const r = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateStr);
+      if (!r) return null;
+      y = +r[1]; m = +r[2]; d = +r[3];
+    }
+    return [{ point: 'Email_Req_Year', value: y }, { point: 'Email_Req_Month', value: m },
+            { point: 'Email_Req_Day', value: d }, { point: 'Send_Daily_Email_Now', value: 1 }];
+  }
+  // Sent after the request is accepted, so a later send from the local touch
+  // panel goes back to "yesterday" instead of reusing this date.
+  function emailResetWrites() {
+    return [{ point: 'Email_Req_Year', value: 0 }, { point: 'Email_Req_Month', value: 0 },
+            { point: 'Email_Req_Day', value: 0 }];
+  }
+  // plc/<id>/debug line -> the daily-email result text, or null.
+  // mqttDebugLog() prepends "[<unixtime>] " whenever the clock is valid (the
+  // only case the send path ever runs under - see daily_email.cpp's "clock
+  // not set" bail-out), so a real line looks like
+  // "[1790000000] daily_email: ...". Strip that timestamp before checking
+  // the prefix; bare (no-timestamp) lines still work too.
+  function dailyEmailResultText(line) {
+    if (typeof line !== 'string') return null;
+    const rest = line.replace(/^\[\d+\]\s*/, '');
+    const p = 'daily_email:';
+    return rest.indexOf(p) === 0 ? rest.slice(p.length).trim() : null;
+  }
+
+  // ---- Instrument calibration (spec 2026-09-27-analog-calibration-design) ----
+  // settings = {raw4, raw20, eng4, eng20} in REGISTER units as read from the
+  // PLC; eng4/eng20 arguments and results are ENGINEERING units (cm, ppm).
+  const CAL_INSTRUMENTS = [
+    { tag: 'LT01', label: 'TAYA 1 level', unit: 'cm', decimals: 0, regScale: 1,
+      raw4: 'SP_L1_4mA', raw20: 'SP_L1_20mA', eng4: 'SP_L1_Eng4', eng20: 'SP_L1_Eng20' },
+    { tag: 'LT02', label: 'TAYA 2 level', unit: 'cm', decimals: 0, regScale: 1,
+      raw4: 'SP_L2_4mA', raw20: 'SP_L2_20mA', eng4: 'SP_L2_Eng4', eng20: 'SP_L2_Eng20' },
+    { tag: 'AIT01_NO3', label: 'NO3', unit: 'ppm', decimals: 1, regScale: 10,
+      raw4: 'SP_N_4mA', raw20: 'SP_N_20mA', eng4: 'SP_N_Eng4', eng20: 'SP_N_Eng20' },
+  ];
+  const PROCESS_SETPOINTS = SETPOINTS.filter(s => s.group !== 'Calibration');
+
+  function averageLast(values, n) {
+    const last = values.slice(-n);
+    if (last.length < n || last.some(v => typeof v !== 'number')) return null;
+    return Math.round(last.reduce((a, b) => a + b, 0) / n * 1000) / 1000;
+  }
+
+  function roundTo(v, decimals) { const f = Math.pow(10, decimals + 2); return Math.round(v * f) / f; }
+
+  // The register value that would actually be written for an engineering-unit
+  // input (Math.round(v * regScale), with -0 normalized to 0 - see
+  // validateRange). Shared so the confirm text always shows what will be
+  // written, not a separately-rounded display value (2026-09-28 review fix).
+  function engToRegister(v, inst) {
+    const r = Math.round(v * inst.regScale);
+    return r === 0 ? 0 : r;
+  }
+
+  function currentValueFromMilliamps(inst, mA, settings) {
+    if (typeof mA !== 'number') return null;
+    const e4 = settings.eng4 / inst.regScale, e20 = settings.eng20 / inst.regScale;
+    return roundTo(e4 + (mA - 4) * (e20 - e4) / 16, inst.decimals);
+  }
+
+  function zeroAdjust(eng4, eng20, shown, actual) {
+    const d = actual - shown;
+    return { eng4: eng4 + d, eng20: eng20 + d };
+  }
+
+  function twoPointRange(p1, p2) {
+    if (Math.abs(p2.mA - p1.mA) < 2) return { error: 'The two points must be at least 2 mA apart' };
+    const slope = (p2.value - p1.value) / (p2.mA - p1.mA);
+    return { eng4: roundTo(p1.value + (4 - p1.mA) * slope, 2), eng20: roundTo(p1.value + (20 - p1.mA) * slope, 2) };
+  }
+
+  // Refuses an electrical (raw ADC count) capture that would make the
+  // raw4/raw20 pair inverted or zero-width. `which` is 'raw4' or 'raw20' -
+  // the end being captured now; `otherRaw` is the OTHER end's current
+  // setting (unchanged by this capture). Final review item 5.
+  function validateRawCapture(which, newRaw, otherRaw) {
+    if (which === 'raw4') {
+      if (!(otherRaw > newRaw)) return { ok: false, reason: 'The 4 mA count must be below the 20 mA count (' + otherRaw + ')' };
+    } else {
+      if (!(newRaw > otherRaw)) return { ok: false, reason: 'The 20 mA count must be above the 4 mA count (' + otherRaw + ')' };
+    }
+    return { ok: true };
+  }
+
+  function validateRange(inst, eng4, eng20) {
+    if (!(eng20 > eng4)) return { ok: false, reason: 'The value at 20 mA must be above the value at 4 mA' };
+    const r4 = engToRegister(eng4, inst), r20 = engToRegister(eng20, inst);
+    const sp4 = SETPOINTS.find(s => s.name === inst.eng4), sp20 = SETPOINTS.find(s => s.name === inst.eng20);
+    const fmt = v => (v / inst.regScale) + ' ' + inst.unit;
+    if (r4 < sp4.min || r4 > sp4.max) return { ok: false, reason: 'The value at 4 mA must be between ' + fmt(sp4.min) + ' and ' + fmt(sp4.max) };
+    if (r20 < sp20.min || r20 > sp20.max) return { ok: false, reason: 'The value at 20 mA must be between ' + fmt(sp20.min) + ' and ' + fmt(sp20.max) };
+    return { ok: true, writes: [{ point: inst.eng4, value: r4 }, { point: inst.eng20, value: r20 }] };
+  }
+
+  function calibrationConfirmText(inst, settings, next, mA) {
+    const f = v => Number(v.toFixed(inst.decimals));
+    const old4 = settings.eng4 / inst.regScale, old20 = settings.eng20 / inst.regScale;
+    // Show the value that will actually be written (same register rounding
+    // as validateRange), not next.eng4/eng20 rounded separately - otherwise
+    // the confirmation can show a different value than what gets sent.
+    const newReg4 = engToRegister(next.eng4, inst), newReg20 = engToRegister(next.eng20, inst);
+    const newEng4 = newReg4 / inst.regScale, newEng20 = newReg20 / inst.regScale;
+    const now = currentValueFromMilliamps(inst, mA, settings);
+    const after = currentValueFromMilliamps(inst, mA, { eng4: newReg4, eng20: newReg20 });
+    let text = inst.label + ': value at 4 mA ' + f(old4) + ' → ' + f(newEng4) + ' ' + inst.unit +
+      ', at 20 mA ' + f(old20) + ' → ' + f(newEng20) + ' ' + inst.unit + '.';
+    if (now !== null) text += '\nIt will read ' + f(after) + ' ' + inst.unit + ' (now ' + f(now) + ' ' + inst.unit + ').';
+    return text + '\nThe sequence uses the new value immediately.';
+  }
+
   const HmiLogic = {
     FAULTS, decodeFaultBitmask, SETPOINTS, scaleTelemetryValue,
     packEmailToRegisters, unpackRegistersToEmail,
@@ -362,6 +687,10 @@
     SIM_POINTS, simPointsFromMask, simEnableWrites, realValue, simValueText, simConfirmMessage,
     validateNumber, setpointDiff, pumpState, dosingText, batchOutcome, alarmSummary,
     createRing, sparklinePath, DEMO_FRAMES, describeBoot, sdCardStatus,
+    historyWindow, historyWindowAt, historyStepSeconds, createHistoryAssembler, historyColumns,
+    historyAppendLive, telemetryToHistoryRow, historyEventText, historyErrorText, historyNeedsReload, historyStillBusy, stepShade, demoHistoryChunks,
+    emailRequestWrites, emailResetWrites, dailyEmailResultText,
+    CAL_INSTRUMENTS, PROCESS_SETPOINTS, averageLast, currentValueFromMilliamps, zeroAdjust, twoPointRange, validateRange, validateRawCapture, calibrationConfirmText,
   };
 
   if (typeof module !== 'undefined' && module.exports) {
