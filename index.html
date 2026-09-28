@@ -122,7 +122,7 @@
   .tee{ fill:var(--pipe); }
   .inject circle{ fill:var(--chem-active); stroke:var(--surface); stroke-width:2; }
   .inject text{ font-size:11px; fill:var(--chem-active); font-weight:600; }
-  .step-banner{ display:flex; gap:10px; align-items:baseline; flex-wrap:wrap; padding:0 0 8px; margin-bottom:8px; border-bottom:1px solid var(--border); }
+  .step-banner{ display:flex; gap:10px; align-items:center; flex-wrap:wrap; padding:0 0 8px; margin-bottom:8px; border-bottom:1px solid var(--border); }
   .step-banner #vStep{ font-size:17px; font-weight:600; }
   .step-banner #vStepName{ font-size:14px; color:var(--ink-2); }
   .html-sim.is-sim{ outline:2px dashed var(--sim); outline-offset:2px; border-radius:4px; color:var(--sim-ink); }
@@ -293,7 +293,15 @@
   <div class="ov-grid">
     <section class="panel mimic-panel">
       <div class="panel-body">
-        <div class="step-banner"><span class="mono" id="vStep">—</span><span id="vStepName"></span></div>
+        <div class="step-banner">
+          <span class="mono" id="vStep">—</span><span id="vStepName"></span>
+          <div class="actions" style="margin:0 0 0 auto; display:flex; gap:8px; align-items:center;">
+            <span class="muted small" id="process-run-status">Run permission: unknown</span>
+            <button type="button" class="action" id="hmi-start-btn">Start process</button>
+            <button type="button" class="action" id="hmi-stop-btn">Stop process</button>
+            <span id="process-action-result" class="small"></span>
+          </div>
+        </div>
         <svg id="mimicSvg" viewBox="0 -8 770 388" role="img" aria-label="Pilot skid schematic">
           <defs>
             <symbol id="sym-pump" viewBox="-16 -16 32 32">
@@ -518,13 +526,7 @@
         <button type="button" class="action" id="clear-fault-btn">Clear fault</button>
         <span id="alarm-action-result" class="small"></span>
       </div>
-      <p class="muted small" id="alarmReadOnly" hidden style="margin:-4px 0 10px">Read-only: sign in as operator to stop, resume, clear faults, or start/stop the process.</p>
-      <div class="actions">
-        <span class="muted small" id="process-run-status">Run permission: unknown</span>
-        <button type="button" class="action" id="hmi-start-btn">Start process</button>
-        <button type="button" class="action" id="hmi-stop-btn">Stop process</button>
-        <span id="process-action-result" class="small"></span>
-      </div>
+      <p class="muted small" id="alarmReadOnly" hidden style="margin:-4px 0 10px">Read-only: sign in as operator to stop, resume, or clear faults.</p>
       <div id="active-alarms-list"><p class="muted">No active alarms.</p></div>
     </div>
   </section>
@@ -1869,19 +1871,37 @@
   wireProcessAction("hmi-start-btn", "HMI_Start", "Start the process? It runs only while the System switch is ON.");
   wireProcessAction("hmi-stop-btn", "HMI_Stop", "Stop the process (normal stop, no alarm)? It stays stopped until Start.");
 
+  function updateProcessButtons(){
+    var op = window.hmiIsOperator ? window.hmiIsOperator() : false;
+    var startBtn = $("hmi-start-btn"), stopBtn = $("hmi-stop-btn");
+    if (startBtn) {
+      startBtn.disabled = !op;
+      startBtn.title = op ? "" : "Sign in as operator to start the process";
+    }
+    if (stopBtn) {
+      stopBtn.disabled = !op;
+      stopBtn.title = op ? "" : "Sign in as operator to stop the process";
+    }
+  }
+
   document.addEventListener("hmi:telemetry", function(e){
     var t = e.detail;
     var el = $("process-run-status");
-    if (!("HMI_Run" in t)) { el.textContent = "Run permission: unknown"; return; }
-    el.textContent = "Run permission: " + (t.HMI_Run ? "ON" : "OFF");
+    if (el) {
+      if (!("HMI_Run" in t)) { el.textContent = "Run permission: unknown"; }
+      else { el.textContent = "Run permission: " + (t.HMI_Run ? "ON" : "OFF"); }
+    }
+    updateProcessButtons();
   });
 
   // Viewer tier: disable rather than let a confirmed click fail with not_operator.
   document.addEventListener("hmi:page", function(e){
-    if (e.detail !== "alarms") return;
     var op = window.hmiIsOperator();
-    ["stop-btn", "resume-btn", "clear-fault-btn", "hmi-start-btn", "hmi-stop-btn"].forEach(function(id){ $(id).disabled = !op; });
-    $("alarmReadOnly").hidden = op;
+    if (e.detail === "alarms") {
+      ["stop-btn", "resume-btn", "clear-fault-btn"].forEach(function(id){ $(id).disabled = !op; });
+      $("alarmReadOnly").hidden = op;
+    }
+    updateProcessButtons();
   });
   document.addEventListener("hmi:signout", function(){
     $("alarm-action-result").textContent = "";
