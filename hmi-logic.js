@@ -281,8 +281,21 @@
   }
 
   function alarmSummary(bitmask) {
-    const n = typeof bitmask === 'number' ? decodeFaultBitmask(bitmask).length : 0;
-    return { count: n, text: n === 0 ? 'No alarms' : (n === 1 ? '1 alarm' : n + ' alarms') };
+    const list = typeof bitmask === 'number' ? decodeFaultBitmask(bitmask) : [];
+    let faults = 0, alerts = 0;
+    for (const f of list) {
+      if (f.type === 'Fault') faults++;
+      else if (f.type === 'Alert') alerts++;
+    }
+    const n = list.length;
+    return {
+      count: n,
+      text: n === 0 ? 'No alarms' : (n === 1 ? '1 alarm' : n + ' alarms'),
+      faultCount: faults,
+      alertCount: alerts,
+      faultText: faults === 0 ? '0 Faults' : (faults === 1 ? '1 Fault' : faults + ' Faults'),
+      alertText: alerts === 0 ? '0 Alerts' : (alerts === 1 ? '1 Alert' : alerts + ' Alerts'),
+    };
   }
 
   // Session-only trend buffers for the Overview sparklines.

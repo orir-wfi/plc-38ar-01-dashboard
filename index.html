@@ -55,8 +55,12 @@
   .pill.on{ color:var(--accent); border-color:var(--accent); } .pill.on .dot{ background:var(--accent); }
   .pill.off{ color:var(--critical); border-color:var(--critical); background:var(--critical-tint); } .pill.off .dot{ background:var(--critical); }
   .switch-pill{ padding:3px 9px; font-size:12px; }
-  .alarm-btn{ font:inherit; font-size:13px; font-weight:600; border:1px solid var(--border); background:var(--surface); color:var(--ink-2); padding:5px 12px; border-radius:8px; cursor:pointer; }
+  .alarm-btn{ font:inherit; font-size:12.5px; font-weight:600; border:1px solid var(--border); background:var(--surface); color:var(--ink-2); padding:5px 10px; border-radius:8px; cursor:pointer; }
   .alarm-btn.active{ border:2px solid var(--critical); color:var(--critical); background:var(--critical-tint); }
+  .alarm-btn.fault-btn.active{ border:2px solid var(--critical); color:var(--critical); background:var(--critical-tint); }
+  .alarm-btn.alert-btn.active{ border:2px solid var(--warning); color:var(--warning); background:rgba(217,119,6,0.12); }
+  .timer-sp{ font-weight:700; color:var(--ink); }
+  .timer-run{ font-weight:400; color:var(--ink-2); }
   .lastseen{ font-size:11.5px; color:var(--ink-3); padding:4px 16px 0; max-width:1100px; margin:0 auto; }
   .sim-strip{ display:block; width:100%; text-align:left; font:inherit; font-size:13px; font-weight:700; background:var(--sim-tint); color:var(--sim-ink); border:0; border-bottom:2px solid var(--sim); padding:6px 16px; cursor:pointer; }
 
@@ -232,7 +236,8 @@
   <div class="hdr-right">
     <span class="pill html-sim" data-sim-point="System_Switch" id="hdrSwitchPill" title="Main System Switch on PLC panel"><span class="dot"></span><span id="hdrSwitchText">Main switch: —</span></span>
     <span class="pill" id="statusPill"><span class="dot"></span><span id="statusText">Not connected</span></span>
-    <button type="button" class="alarm-btn" id="alarmBtn">No alarms</button>
+    <button type="button" class="alarm-btn fault-btn" id="faultBtn" title="Active faults">0 Faults</button>
+    <button type="button" class="alarm-btn alert-btn" id="alertBtn" title="Active alerts">0 Alerts</button>
   </div>
 </header>
 <button type="button" class="sim-strip" id="simStrip" hidden></button>
@@ -543,7 +548,7 @@
 <div class="wrap">
   <section class="panel">
     <div class="panel-body">
-      <h2 class="sec">Active alarms</h2>
+      <h2 class="sec">Active alarms <span id="alarmCountsHeader" class="small muted" style="margin-left:8px;font-weight:normal"></span></h2>
       <div class="actions">
         <button type="button" class="action" id="stop-btn">Stop</button>
         <button type="button" class="action" id="resume-btn">Resume</button>
@@ -676,7 +681,7 @@
   function $(id){ return document.getElementById(id); }
   var els = {
     statusPill: $("statusPill"), statusText: $("statusText"), lastSeen: $("lastSeen"),
-    alarmBtn: $("alarmBtn"), simStrip: $("simStrip"), signin: $("signin"),
+    faultBtn: $("faultBtn"), alertBtn: $("alertBtn"), alarmBtn: $("alarmBtn"), simStrip: $("simStrip"), signin: $("signin"),
     connForm: $("connForm"), connectBtn: $("connectBtn"), connError: $("connError"),
     fUser: $("fUser"), fPass: $("fPass"), fHost: $("fHost"), fPort: $("fPort"),
     signedInAs: $("signedInAs"), signOutBtn: $("signOutBtn"),
@@ -754,8 +759,18 @@
 
   function renderHeader(t){
     var s = HmiLogic.alarmSummary(t.FaultBitmask);
-    els.alarmBtn.textContent = (s.count ? "▲ " : "") + s.text;
-    els.alarmBtn.classList.toggle("active", s.count > 0);
+    if (els.faultBtn) {
+      els.faultBtn.textContent = (s.faultCount ? "■ " : "") + s.faultText;
+      els.faultBtn.classList.toggle("active", s.faultCount > 0);
+    }
+    if (els.alertBtn) {
+      els.alertBtn.textContent = (s.alertCount ? "▲ " : "") + s.alertText;
+      els.alertBtn.classList.toggle("active", s.alertCount > 0);
+    }
+    if (els.alarmBtn) {
+      els.alarmBtn.textContent = (s.count ? "▲ " : "") + s.text;
+      els.alarmBtn.classList.toggle("active", s.count > 0);
+    }
     var sims = HmiLogic.simPointsFromMask(t.Sim_Mask || 0);
     els.simStrip.hidden = sims.length === 0;
     if (sims.length) els.simStrip.textContent = "SIMULATION ACTIVE: " + sims.join(", ") + "  → Simulation panel";
@@ -906,7 +921,9 @@
   document.querySelectorAll("#dash-nav button").forEach(function(btn){
     btn.addEventListener("click", function(){ window.hmiShowPage(btn.dataset.page); });
   });
-  els.alarmBtn.addEventListener("click", function(){ window.hmiShowPage("alarms"); });
+  if (els.faultBtn) els.faultBtn.addEventListener("click", function(){ window.hmiShowPage("alarms"); });
+  if (els.alertBtn) els.alertBtn.addEventListener("click", function(){ window.hmiShowPage("alarms"); });
+  if (els.alarmBtn) els.alarmBtn.addEventListener("click", function(){ window.hmiShowPage("alarms"); });
   els.simStrip.addEventListener("click", function(){
     window.hmiShowPage("system");
     var panel = $("simPanel");
@@ -953,6 +970,7 @@
 
   function $(id){ return document.getElementById(id); }
   function setText(id, text){ $(id).textContent = text; }
+  function setHtml(id, html){ var el = $(id); if (el) el.innerHTML = html; }
   function setBar(id, cm){
     var h = Math.max(0, Math.min(196, (cm / levelFullScaleCm) * 196));
     $(id).setAttribute("y", 278 - h);
@@ -1039,46 +1057,49 @@
       return null;
     }
 
-    // Running timers displayed as running / SP
+    // Running timers displayed as running / SP (SP in bold)
     var target = getStepTargetSP(t);
     var t16Val = typeof t.t_16 === "number" ? t.t_16 : (t.Step === 100 ? 0 : null);
-    var stepTimerText = "—";
+    var stepTimerHtml = "—";
+    var stepTimerBadgeHtml = "Step: —";
     if (t16Val !== null) {
       if (target && target.sp > 0) {
-        stepTimerText = t16Val + " / " + target.sp + " s";
+        stepTimerHtml = '<span class="timer-run">' + t16Val + '</span> / <b class="timer-sp">' + target.sp + '</b> s';
+        stepTimerBadgeHtml = 'Step: <span class="timer-run">' + t16Val + '</span> / <b class="timer-sp">' + target.sp + '</b> s';
       } else {
-        stepTimerText = t16Val + " s";
+        stepTimerHtml = t16Val + " s";
+        stepTimerBadgeHtml = "Step: " + t16Val + " s";
       }
     }
-    setText("vStepTimer", stepTimerText);
-    setText("stepTimerBadgeText", "Step: " + stepTimerText);
+    setHtml("vStepTimer", stepTimerHtml);
+    setHtml("stepTimerBadgeText", stepTimerBadgeHtml);
 
     if (typeof t.Step === "number") {
       if (t.Step === 104 || t.Step === 108) {
-        setText("vStepTimerSub", "Delay phase" + (target ? " (SP: " + target.sp + " s)" : ""));
+        setHtml("vStepTimerSub", "Delay phase" + (target ? ' (SP: <b class="timer-sp">' + target.sp + '</b> s)' : ""));
       } else if (t.Step === 106) {
         var sp11 = timerSP("T_11", 900);
-        setText("vStepTimerSub", "P1 pumping" + (typeof t.t_11 === "number" ? " · t_11: " + t.t_11 + " / " + sp11 + " s" : ""));
+        setHtml("vStepTimerSub", "P1 pumping" + (typeof t.t_11 === "number" ? ' · t_11: <span class="timer-run">' + t.t_11 + '</span> / <b class="timer-sp">' + sp11 + '</b> s' : ""));
       } else if (t.Step === 110) {
         var sp12 = timerSP("T_12", 900);
-        setText("vStepTimerSub", "P2 pumping" + (typeof t.t_12 === "number" ? " · t_12: " + t.t_12 + " / " + sp12 + " s" : ""));
+        setHtml("vStepTimerSub", "P2 pumping" + (typeof t.t_12 === "number" ? ' · t_12: <span class="timer-run">' + t.t_12 + '</span> / <b class="timer-sp">' + sp12 + '</b> s' : ""));
       } else if (t.Step === 102) {
-        setText("vStepTimerSub", "Ready / settling (3 s check)");
+        setHtml("vStepTimerSub", "Ready / settling (3 s check)");
       } else if (t.Step === 100) {
-        setText("vStepTimerSub", "Stopped");
+        setHtml("vStepTimerSub", "Stopped");
       } else {
-        setText("vStepTimerSub", "");
+        setHtml("vStepTimerSub", "");
       }
     }
 
     var halfCycleTimer = t.Cycle_Type === 1 ? t.t_13 : t.t_14;
     var halfCycleSP = t.Cycle_Type === 1 ? timerSP("T_13", 1800) : timerSP("T_14", 1800);
     if (typeof halfCycleTimer === "number") {
-      setText("vCycleTimer", halfCycleTimer + " / " + halfCycleSP + " s");
-      setText("vCycleTimerSub", t.Cycle_Type === 1 ? "Large half-cycle (SP T_13: " + halfCycleSP + " s)" : "Small half-cycle (SP T_14: " + halfCycleSP + " s)");
+      setHtml("vCycleTimer", '<span class="timer-run">' + halfCycleTimer + '</span> / <b class="timer-sp">' + halfCycleSP + '</b> s');
+      setHtml("vCycleTimerSub", t.Cycle_Type === 1 ? 'Large half-cycle (SP T_13: <b class="timer-sp">' + halfCycleSP + '</b> s)' : 'Small half-cycle (SP T_14: <b class="timer-sp">' + halfCycleSP + '</b> s)');
     } else {
-      setText("vCycleTimer", "— / " + halfCycleSP + " s");
-      setText("vCycleTimerSub", t.Cycle_Type === 1 ? "Large half-cycle (T_13)" : "Small half-cycle (T_14)");
+      setHtml("vCycleTimer", '— / <b class="timer-sp">' + halfCycleSP + '</b> s');
+      setHtml("vCycleTimerSub", t.Cycle_Type === 1 ? "Large half-cycle (T_13)" : "Small half-cycle (T_14)");
     }
 
     renderPumps(t);
@@ -1152,9 +1173,9 @@
       if (t.Step === 102) return { sp: 3 };
       return null;
     })() : null;
-    var liveText = (target && target.sp > 0) ? (liveT16 + " / " + target.sp + " s") : (liveT16 + " s");
-    setText("vStepTimer", liveText);
-    setText("stepTimerBadgeText", "Step: " + liveText);
+    var liveHtml = (target && target.sp > 0) ? ('<span class="timer-run">' + liveT16 + '</span> / <b class="timer-sp">' + target.sp + '</b> s') : (liveT16 + " s");
+    setHtml("vStepTimer", liveHtml);
+    setHtml("stepTimerBadgeText", "Step: " + liveHtml);
   }, 1000);
   document.addEventListener("hmi:page", function(e){ if (e.detail === "overview") refreshOverviewReads(); });
   document.addEventListener("hmi:signout", resetOverview);
@@ -1195,12 +1216,12 @@
         fpTimerRow.hidden = false;
         var p1T = typeof t.t_11 === "number" ? t.t_11 : 0;
         var p1SP = (typeof coils.T_11 === "number" && coils.T_11 > 0) ? coils.T_11 : 900;
-        $("fpTimerVal").textContent = p1T + " / " + p1SP + " s";
+        $("fpTimerVal").innerHTML = '<span class="timer-run">' + p1T + '</span> / <b class="timer-sp">' + p1SP + '</b> s';
       } else if (current === "P2") {
         fpTimerRow.hidden = false;
         var p2T = typeof t.t_12 === "number" ? t.t_12 : 0;
         var p2SP = (typeof coils.T_12 === "number" && coils.T_12 > 0) ? coils.T_12 : 900;
-        $("fpTimerVal").textContent = p2T + " / " + p2SP + " s";
+        $("fpTimerVal").innerHTML = '<span class="timer-run">' + p2T + '</span> / <b class="timer-sp">' + p2SP + '</b> s';
       } else {
         fpTimerRow.hidden = true;
       }
@@ -1331,7 +1352,10 @@
 
   var groups = {};
   HmiLogic.PROCESS_SETPOINTS.forEach(function(sp){ (groups[sp.group] = groups[sp.group] || []).push(sp); });
-  Object.keys(groups).forEach(function(groupName){
+  var groupOrder = ["Timers", "Levels", "NO3", "Dosing"];
+  Object.keys(groups).forEach(function(g){ if (groupOrder.indexOf(g) === -1) groupOrder.push(g); });
+  groupOrder.forEach(function(groupName){
+    if (!groups[groupName]) return;
     var section = document.createElement("section");
     section.className = "panel";
     section.innerHTML = '<div class="panel-head"><h2></h2></div><div class="panel-body"></div>';
@@ -1981,6 +2005,15 @@
   function renderActiveAlarms(bitmask){
     var faults = HmiLogic.decodeFaultBitmask(bitmask);
     var list = $("active-alarms-list");
+    var s = HmiLogic.alarmSummary(bitmask);
+    var countsHdr = $("alarmCountsHeader");
+    if (countsHdr) {
+      if (s.count === 0) {
+        countsHdr.innerHTML = '';
+      } else {
+        countsHdr.innerHTML = '(<span class="prio fault">' + s.faultText + '</span> · <span class="prio alert">' + s.alertText + '</span>)';
+      }
+    }
     if (faults.length === 0) { list.innerHTML = '<p class="muted">No active alarms.</p>'; return; }
     list.innerHTML = "";
     faults.forEach(function(f){
