@@ -304,8 +304,8 @@
 
   // Canned telemetry for ?demo=<name> (design review / screenshots only).
   const DEMO_BASE = {
-    System_Switch: 1, Reset_Inactive_Alarms: 0, Q_Stop: 1, P1_OL: 0, P2_OL: 0, P3_OL: 0,
-    P4_OL: 0, P5_OL: 0, FT101_P: 0, LS0_low: 1, LT01: 104, LT02: 82, AIT01_NO3: 421,
+    System_Switch: 1, Reset_Inactive_Alarms: 0, Q_Stop: 1, P1_OL: 1, P2_OL: 1, P3_OL: 1,
+    P4_OL: 1, P5_OL: 1, FT101_P: 0, LS0_low: 1, LT01: 104, LT02: 82, AIT01_NO3: 421,
     FT101_accumulated: 182, ActiveFaultCount: 0, FaultBitmask: 0, HMI_Run: 1, TAYA_Fault: 0,
     Inlet_Fault: 0, Sugar_Fault: 0, DP1_Fault: 0, P3_Fault: 0, Force_B14_Manual: 0,
     Emergency_Stop: 0, C_10: 7, C_11: 4, C_12: 3, C_13: 2.1, C_14: 1.9,
@@ -317,6 +317,7 @@
   const DEMO_FRAMES = {
     normal: Object.assign({}, DEMO_BASE),
     alarm: Object.assign({}, DEMO_BASE, {
+      P1_OL: 0,
       Step: 102, Cycle_Type: 0, ActiveFaultCount: 3, TAYA_Fault: 1,
       FaultBitmask: (1 << 1) | (1 << 9) | (1 << 17), LT01: 168, AIT01_NO3: 38,
     }),
