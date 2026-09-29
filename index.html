@@ -1014,22 +1014,56 @@
       setText("vCyclesSub", "Large " + t.C_11 + " · Small " + t.C_12);
     }
 
-    // Running timers
+    function timerSP(name, fallback){
+      if (typeof coils[name] === "number" && coils[name] > 0) return coils[name];
+      return fallback;
+    }
+
+    function getStepTargetSP(stepData){
+      if (!stepData || typeof stepData.Step !== "number") return null;
+      if (stepData.Step === 106) return { sp: timerSP("T_11", 900), name: "T_11" };
+      if (stepData.Step === 110) return { sp: timerSP("T_12", 900), name: "T_12" };
+      if (stepData.Step === 104) {
+        var halfSP1 = stepData.Cycle_Type === 1 ? timerSP("T_13", 1800) : timerSP("T_14", 1800);
+        var p1 = typeof stepData.t_11 === "number" ? stepData.t_11 : 0;
+        return { sp: Math.max(0, halfSP1 - p1), name: "Delay" };
+      }
+      if (stepData.Step === 108) {
+        var halfSP2 = stepData.Cycle_Type === 1 ? timerSP("T_13", 1800) : timerSP("T_14", 1800);
+        var p2 = typeof stepData.t_12 === "number" ? stepData.t_12 : 0;
+        return { sp: Math.max(0, halfSP2 - p2), name: "Delay" };
+      }
+      if (stepData.Step === 102) return { sp: 3, name: "Hold" };
+      if (stepData.Step === 100) return null;
+      if (timerSP("T_16", 0) > 0) return { sp: timerSP("T_16", 0), name: "T_16" };
+      return null;
+    }
+
+    // Running timers displayed as running / SP
+    var target = getStepTargetSP(t);
+    var t16Val = typeof t.t_16 === "number" ? t.t_16 : (t.Step === 100 ? 0 : null);
     var stepTimerText = "—";
-    if (typeof t.t_16 === "number") {
-      stepTimerText = t.t_16 + " s";
+    if (t16Val !== null) {
+      if (target && target.sp > 0) {
+        stepTimerText = t16Val + " / " + target.sp + " s";
+      } else {
+        stepTimerText = t16Val + " s";
+      }
     }
     setText("vStepTimer", stepTimerText);
     setText("stepTimerBadgeText", "Step: " + stepTimerText);
+
     if (typeof t.Step === "number") {
       if (t.Step === 104 || t.Step === 108) {
-        setText("vStepTimerSub", "Delay phase");
+        setText("vStepTimerSub", "Delay phase" + (target ? " (SP: " + target.sp + " s)" : ""));
       } else if (t.Step === 106) {
-        setText("vStepTimerSub", "P1 pumping" + (typeof t.t_11 === "number" ? " · t_11: " + t.t_11 + " s" : ""));
+        var sp11 = timerSP("T_11", 900);
+        setText("vStepTimerSub", "P1 pumping" + (typeof t.t_11 === "number" ? " · t_11: " + t.t_11 + " / " + sp11 + " s" : ""));
       } else if (t.Step === 110) {
-        setText("vStepTimerSub", "P2 pumping" + (typeof t.t_12 === "number" ? " · t_12: " + t.t_12 + " s" : ""));
+        var sp12 = timerSP("T_12", 900);
+        setText("vStepTimerSub", "P2 pumping" + (typeof t.t_12 === "number" ? " · t_12: " + t.t_12 + " / " + sp12 + " s" : ""));
       } else if (t.Step === 102) {
-        setText("vStepTimerSub", "Ready / settling");
+        setText("vStepTimerSub", "Ready / settling (3 s check)");
       } else if (t.Step === 100) {
         setText("vStepTimerSub", "Stopped");
       } else {
@@ -1038,12 +1072,13 @@
     }
 
     var halfCycleTimer = t.Cycle_Type === 1 ? t.t_13 : t.t_14;
+    var halfCycleSP = t.Cycle_Type === 1 ? timerSP("T_13", 1800) : timerSP("T_14", 1800);
     if (typeof halfCycleTimer === "number") {
-      setText("vCycleTimer", halfCycleTimer + " s");
-      setText("vCycleTimerSub", t.Cycle_Type === 1 ? "Large half-cycle (t_13)" : "Small half-cycle (t_14)");
+      setText("vCycleTimer", halfCycleTimer + " / " + halfCycleSP + " s");
+      setText("vCycleTimerSub", t.Cycle_Type === 1 ? "Large half-cycle (SP T_13: " + halfCycleSP + " s)" : "Small half-cycle (SP T_14: " + halfCycleSP + " s)");
     } else {
-      setText("vCycleTimer", "—");
-      setText("vCycleTimerSub", "");
+      setText("vCycleTimer", "— / " + halfCycleSP + " s");
+      setText("vCycleTimerSub", t.Cycle_Type === 1 ? "Large half-cycle (T_13)" : "Small half-cycle (T_14)");
     }
 
     renderPumps(t);
@@ -1058,7 +1093,8 @@
   function refreshOverviewReads(){
     if (!window.hmiIsOperator()) return; // viewer: pump states fall back to the step
     readPoints(["SP_L3", "P1_ON", "P2_ON", "P3_ON", "P4_ON", "DP1_ON",
-                "P1_Mode", "P2_Mode", "P3_Mode", "P4_Mode", "DP1_Mode", "B14"], function(resp){
+                "P1_Mode", "P2_Mode", "P3_Mode", "P4_Mode", "DP1_Mode", "B14",
+                "T_11", "T_12", "T_13", "T_14", "T_16"], function(resp){
       if (!resp.ok) return;
       if (typeof resp.values.SP_L3 === "number" && resp.values.SP_L3 > 0) levelFullScaleCm = resp.values.SP_L3;
       Object.assign(coils, resp.values);
@@ -1102,8 +1138,23 @@
     if (!t || t.Step === 100) return;
     var elapsed = Math.floor((Date.now() - lastTeleAt) / 1000);
     var liveT16 = lastT16 + elapsed;
-    setText("vStepTimer", liveT16 + " s");
-    setText("stepTimerBadgeText", "Step: " + liveT16 + " s");
+    var target = (typeof coils.T_11 === "number" || typeof coils.T_13 === "number") ? (function(){
+      if (t.Step === 106) return { sp: (typeof coils.T_11 === "number" ? coils.T_11 : 900) };
+      if (t.Step === 110) return { sp: (typeof coils.T_12 === "number" ? coils.T_12 : 900) };
+      if (t.Step === 104) {
+        var hsp1 = t.Cycle_Type === 1 ? (typeof coils.T_13 === "number" ? coils.T_13 : 1800) : (typeof coils.T_14 === "number" ? coils.T_14 : 1800);
+        return { sp: Math.max(0, hsp1 - (typeof t.t_11 === "number" ? t.t_11 : 0)) };
+      }
+      if (t.Step === 108) {
+        var hsp2 = t.Cycle_Type === 1 ? (typeof coils.T_13 === "number" ? coils.T_13 : 1800) : (typeof coils.T_14 === "number" ? coils.T_14 : 1800);
+        return { sp: Math.max(0, hsp2 - (typeof t.t_12 === "number" ? t.t_12 : 0)) };
+      }
+      if (t.Step === 102) return { sp: 3 };
+      return null;
+    })() : null;
+    var liveText = (target && target.sp > 0) ? (liveT16 + " / " + target.sp + " s") : (liveT16 + " s");
+    setText("vStepTimer", liveText);
+    setText("stepTimerBadgeText", "Step: " + liveText);
   }, 1000);
   document.addEventListener("hmi:page", function(e){ if (e.detail === "overview") refreshOverviewReads(); });
   document.addEventListener("hmi:signout", resetOverview);
@@ -1140,12 +1191,16 @@
 
     var fpTimerRow = $("fpTimerRow");
     if (fpTimerRow) {
-      if (current === "P1" && typeof t.t_11 === "number") {
+      if (current === "P1") {
         fpTimerRow.hidden = false;
-        $("fpTimerVal").textContent = t.t_11 + " s";
-      } else if (current === "P2" && typeof t.t_12 === "number") {
+        var p1T = typeof t.t_11 === "number" ? t.t_11 : 0;
+        var p1SP = (typeof coils.T_11 === "number" && coils.T_11 > 0) ? coils.T_11 : 900;
+        $("fpTimerVal").textContent = p1T + " / " + p1SP + " s";
+      } else if (current === "P2") {
         fpTimerRow.hidden = false;
-        $("fpTimerVal").textContent = t.t_12 + " s";
+        var p2T = typeof t.t_12 === "number" ? t.t_12 : 0;
+        var p2SP = (typeof coils.T_12 === "number" && coils.T_12 > 0) ? coils.T_12 : 900;
+        $("fpTimerVal").textContent = p2T + " / " + p2SP + " s";
       } else {
         fpTimerRow.hidden = true;
       }
