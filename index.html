@@ -1246,12 +1246,14 @@
     card.innerHTML =
       '<div class="panel-head"><h2></h2></div><div class="panel-body">' +
       '<p class="cal-live simable-html" data-sim-point="' + t + '" id="cal-live-' + t + '">Raw — · — mA · —</p>' +
-      '<div class="cal-sub">Electrical (loop calibrator or the transmitter\'s test output)</div>' +
-      '<p class="small muted">Press Stop process first; loop-break faults will trip while the calibrator is connected — Clear them afterwards.</p>' +
-      '<div class="cal-row"><label>4 mA count</label><span class="mono" id="cal-raw4-' + t + '">—</span>' +
+      '<div class="cal-sub">Electrical (ADC counts at 4 mA and 20 mA)</div>' +
+      '<p class="small muted">Type counts directly, or use live reading. If empty/dry (4 mA), click Use current reading on 4 mA, then Calc 20 mA (5×).</p>' +
+      '<div class="cal-row"><label>4 mA count</label><input id="cal-raw4-' + t + '" inputmode="numeric"> counts' +
         '<button type="button" class="secondary" id="cal-cap4-' + t + '">Use current reading</button></div>' +
-      '<div class="cal-row"><label>20 mA count</label><span class="mono" id="cal-raw20-' + t + '">—</span>' +
-        '<button type="button" class="secondary" id="cal-cap20-' + t + '">Use current reading</button></div>' +
+      '<div class="cal-row"><label>20 mA count</label><input id="cal-raw20-' + t + '" inputmode="numeric"> counts' +
+        '<button type="button" class="secondary" id="cal-cap20-' + t + '">Use current reading</button>' +
+        '<button type="button" class="secondary" id="cal-calc20-' + t + '" title="Set 20 mA count to 5 × 4 mA count">Calc 20 mA (5×)</button>' +
+        '<button type="button" class="action" id="cal-elec-' + t + '">Apply electrical</button></div>' +
       '<div class="cal-sub">Range' + (u === "cm" ? ' (4 mA = height of the sensor\'s zero above the tank bottom)' : '') + '</div>' +
       '<div class="cal-row"><label>Value at 4 mA</label><input id="cal-e4-' + t + '" inputmode="decimal"> ' + u + '</div>' +
       '<div class="cal-row"><label>Value at 20 mA</label><input id="cal-e20-' + t + '" inputmode="decimal"> ' + u +
@@ -1283,15 +1285,15 @@
       " · " + (mA === null ? "— mA" : mA.toFixed(2) + " mA") + " · " +
       (s && (s.raw20 <= s.raw4) ? "check electrical calibration" : (val === null ? "—" : val.toFixed(i.decimals) + " " + i.unit));
     var op = window.hmiIsOperator();
-    ["cal-cap4-", "cal-cap20-"].forEach(function(p){ $(p + tag).disabled = !op || adc === null || !s; });
+    ["cal-cap4-", "cal-cap20-", "cal-calc20-", "cal-elec-"].forEach(function(p){ $(p + tag).disabled = !op || !s; });
     ["cal-zeroapply-", "cal-p1cap-", "cal-p2cap-"].forEach(function(p){ $(p + tag).disabled = !op || mA === null || !s; });
     ["cal-range-", "cal-2apply-"].forEach(function(p){ $(p + tag).disabled = !op || !s; });
   }
 
   function fillSettings(tag){
     var i = inst(tag), s = settings[tag];
-    $("cal-raw4-" + tag).textContent = s ? String(s.raw4) : "—";
-    $("cal-raw20-" + tag).textContent = s ? String(s.raw20) : "—";
+    $("cal-raw4-" + tag).value = s ? String(s.raw4) : "";
+    $("cal-raw20-" + tag).value = s ? String(s.raw20) : "";
     $("cal-e4-" + tag).value = s ? String(s.eng4 / i.regScale) : "";
     $("cal-e20-" + tag).value = s ? String(s.eng20 / i.regScale) : "";
   }
@@ -1333,15 +1335,31 @@
     var t = i.tag;
     $("cal-cap4-" + t).addEventListener("click", function(){
       var raw = avgAdc(t);
-      var v = HmiLogic.validateRawCapture("raw4", raw, settings[t].raw20);
-      if (!v.ok) { result(t, v.reason, true); return; }
-      write(t, [{ point: i.raw4, value: raw }], i.label + ": 4 mA count " + settings[t].raw4 + " → " + raw + ".\nOnly do this while the input is driven at exactly 4 mA.");
+      if (raw === null) { result(t, "Waiting for live ADC reading", true); return; }
+      $("cal-raw4-" + t).value = String(raw);
     });
     $("cal-cap20-" + t).addEventListener("click", function(){
       var raw = avgAdc(t);
-      var v = HmiLogic.validateRawCapture("raw20", raw, settings[t].raw4);
+      if (raw === null) { result(t, "Waiting for live ADC reading", true); return; }
+      $("cal-raw20-" + t).value = String(raw);
+    });
+    $("cal-calc20-" + t).addEventListener("click", function(){
+      var raw4 = parseInt($("cal-raw4-" + t).value, 10);
+      if (isNaN(raw4) || raw4 <= 0) { result(t, "Enter or capture 4 mA count first", true); return; }
+      var raw20 = Math.round(raw4 * 5);
+      if (raw20 > 4095) raw20 = 4095;
+      $("cal-raw20-" + t).value = String(raw20);
+    });
+    $("cal-elec-" + t).addEventListener("click", function(){
+      var raw4 = parseInt($("cal-raw4-" + t).value, 10);
+      var raw20 = parseInt($("cal-raw20-" + t).value, 10);
+      var v = HmiLogic.validateElectrical(raw4, raw20);
       if (!v.ok) { result(t, v.reason, true); return; }
-      write(t, [{ point: i.raw20, value: raw }], i.label + ": 20 mA count " + settings[t].raw20 + " → " + raw + ".\nOnly do this while the input is driven at exactly 20 mA.");
+      var msg = i.label + ": electrical calibration\n" +
+        "4 mA count " + settings[t].raw4 + " → " + raw4 + "\n" +
+        "20 mA count " + settings[t].raw20 + " → " + raw20 + ".\n" +
+        "Apply these ADC counts?";
+      write(t, [{ point: i.raw4, value: raw4 }, { point: i.raw20, value: raw20 }], msg);
     });
     $("cal-range-" + t).addEventListener("click", function(){
       var e4 = num("cal-e4-" + t), e20 = num("cal-e20-" + t);

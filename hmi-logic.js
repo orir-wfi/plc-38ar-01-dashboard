@@ -642,6 +642,7 @@
   }
 
   // Refuses an electrical (raw ADC count) capture that would make the
+  // Refuses an electrical (raw ADC count) capture that would make the
   // raw4/raw20 pair inverted or zero-width. `which` is 'raw4' or 'raw20' -
   // the end being captured now; `otherRaw` is the OTHER end's current
   // setting (unchanged by this capture). Final review item 5.
@@ -650,6 +651,21 @@
       if (!(otherRaw > newRaw)) return { ok: false, reason: 'The 4 mA count must be below the 20 mA count (' + otherRaw + ')' };
     } else {
       if (!(newRaw > otherRaw)) return { ok: false, reason: 'The 20 mA count must be above the 4 mA count (' + otherRaw + ')' };
+    }
+    return { ok: true };
+  }
+
+  // Validates a full electrical calibration pair (counts at 4 mA and 20 mA)
+  // before applying them to the PLC.
+  function validateElectrical(raw4, raw20) {
+    if (typeof raw4 !== 'number' || typeof raw20 !== 'number' || isNaN(raw4) || isNaN(raw20)) {
+      return { ok: false, reason: 'Enter whole numbers for counts' };
+    }
+    if (raw4 < 0 || raw4 > 4095 || raw20 < 0 || raw20 > 4095) {
+      return { ok: false, reason: 'Allowed range 0–4095 counts' };
+    }
+    if (!(raw20 > raw4)) {
+      return { ok: false, reason: 'The 20 mA count must be above the 4 mA count (' + raw4 + ')' };
     }
     return { ok: true };
   }
@@ -690,7 +706,7 @@
     historyWindow, historyWindowAt, historyStepSeconds, createHistoryAssembler, historyColumns,
     historyAppendLive, telemetryToHistoryRow, historyEventText, historyErrorText, historyNeedsReload, historyStillBusy, stepShade, demoHistoryChunks,
     emailRequestWrites, emailResetWrites, dailyEmailResultText,
-    CAL_INSTRUMENTS, PROCESS_SETPOINTS, averageLast, currentValueFromMilliamps, zeroAdjust, twoPointRange, validateRange, validateRawCapture, calibrationConfirmText,
+    CAL_INSTRUMENTS, PROCESS_SETPOINTS, averageLast, currentValueFromMilliamps, zeroAdjust, twoPointRange, validateRange, validateRawCapture, validateElectrical, calibrationConfirmText,
   };
 
   if (typeof module !== 'undefined' && module.exports) {
