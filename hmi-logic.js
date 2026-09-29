@@ -703,6 +703,75 @@
     return text + '\nThe sequence uses the new value immediately.';
   }
 
+  // Returns the formatted process value (PV / current value) for a setpoint.
+  function currentValueForSetpoint(spName, t, coils) {
+    if (!t) return '—';
+    var lt01 = (typeof t.LT01 === 'number') ? t.LT01 : null;
+    var lt02 = (typeof t.LT02 === 'number') ? t.LT02 : null;
+    var no3 = (typeof t.AIT01_NO3 === 'number') ? scaleTelemetryValue('AIT01_NO3', t.AIT01_NO3) : null;
+    var flow = (typeof t.Dosing_Flow === 'number') ? t.Dosing_Flow : null;
+
+    switch (spName) {
+      case 'SP_L11':
+      case 'SP_L12':
+      case 'SP_L13':
+      case 'SP_L14':
+        return lt01 !== null ? lt01 + ' cm' : '—';
+      case 'SP_L21':
+      case 'SP_L22':
+      case 'SP_L23':
+      case 'SP_L24':
+        return lt02 !== null ? lt02 + ' cm' : '—';
+      case 'SP_L3':
+      case 'SP_L4':
+        if (lt01 !== null && lt02 !== null) return 'T1: ' + lt01 + ' / T2: ' + lt02 + ' cm';
+        if (lt01 !== null) return 'T1: ' + lt01 + ' cm';
+        if (lt02 !== null) return 'T2: ' + lt02 + ' cm';
+        return '—';
+      case 'SP_L5':
+      case 'SP_L6':
+        if (lt01 !== null && lt02 !== null) return ((lt01 + lt02) / 2).toFixed(1) + ' cm';
+        return '—';
+      case 'SP_N1':
+      case 'SP_N2':
+      case 'SP_N3':
+      case 'SP_N4':
+      case 'SP_N5':
+      case 'SP_N6':
+        return no3 !== null ? no3.toFixed(1) + ' ppm' : '—';
+      case 'SP_F01':
+      case 'SP_F02':
+      case 'SP_F03':
+        return flow !== null ? flow + ' mL/h' : '—';
+      case 'SP_F04':
+        return '100 %';
+      case 'T_11':
+        if (typeof t.t_11 === 'number') return t.t_11 + ' s';
+        if (t.Step === 106) return 'Running';
+        return '0 s';
+      case 'T_12':
+        if (typeof t.t_12 === 'number') return t.t_12 + ' s';
+        if (t.Step === 110) return 'Running';
+        return '0 s';
+      case 'T_13':
+        if (typeof t.t_13 === 'number') return t.t_13 + ' s';
+        if (t.Cycle_Type === 1 && typeof t.t_16 === 'number') return t.t_16 + ' s';
+        return '0 s';
+      case 'T_14':
+        if (typeof t.t_14 === 'number') return t.t_14 + ' s';
+        if (t.Cycle_Type === 0 && typeof t.t_16 === 'number') return t.t_16 + ' s';
+        return '0 s';
+      case 'T_15':
+        if (typeof t.t_15 === 'number') return t.t_15 + ' min';
+        return '0 min';
+      case 'T_16':
+        if (typeof t.t_16 === 'number') return t.t_16 + ' s';
+        return '0 s';
+      default:
+        return '—';
+    }
+  }
+
   const HmiLogic = {
     FAULTS, decodeFaultBitmask, SETPOINTS, scaleTelemetryValue,
     packEmailToRegisters, unpackRegistersToEmail,
@@ -714,6 +783,7 @@
     historyAppendLive, telemetryToHistoryRow, historyEventText, historyErrorText, historyNeedsReload, historyStillBusy, stepShade, demoHistoryChunks,
     emailRequestWrites, emailResetWrites, dailyEmailResultText,
     CAL_INSTRUMENTS, PROCESS_SETPOINTS, averageLast, currentValueFromMilliamps, zeroAdjust, twoPointRange, validateRange, validateRawCapture, validateElectrical, calibrationConfirmText,
+    currentValueForSetpoint,
   };
 
   if (typeof module !== 'undefined' && module.exports) {

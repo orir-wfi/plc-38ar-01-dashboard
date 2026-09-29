@@ -149,7 +149,8 @@
   .seg button.on{ background:var(--ink); color:#fff; }
 
   /* Setpoints */
-  .sp-row{ display:grid; grid-template-columns:1fr 110px 54px; gap:10px; align-items:center; padding:6px 0; border-bottom:1px solid var(--border); }
+  .sp-row{ display:grid; grid-template-columns:1fr auto 110px 54px; gap:10px; align-items:center; padding:6px 0; border-bottom:1px solid var(--border); }
+  .sp-pv{ font-family:"IBM Plex Mono",monospace; font-size:12px; color:var(--ink-2); background:var(--surface-2); padding:3px 8px; border-radius:4px; border:1px solid var(--border); white-space:nowrap; }
   .sp-row input{ width:100%; background:var(--surface-2); border:1px solid var(--border); box-shadow:inset 0 1px 2px rgba(0,0,0,.08); border-radius:6px; padding:6px 8px; font-family:"IBM Plex Mono",monospace; font-size:13px; color:var(--ink); }
   .sp-row input.changed{ border:2px solid var(--accent); }
   .sp-row input.invalid{ border:2px solid var(--critical); }
@@ -203,6 +204,7 @@
     .values-panel .desk-only, .values-panel svg.spark{ display:none; }
     .faceplate{ left:12px; right:12px; width:auto; top:auto; bottom:74px; }
     .sp-row{ grid-template-columns:1fr 90px 44px; }
+    .sp-pv{ grid-column:1 / -1; margin-top:-2px; margin-bottom:2px; }
     .review-bar{ bottom:70px; }
     /* The 640-wide mimic renders at ~57% on a 390 px phone, which left
        11 px labels at ~6 px. These source sizes land at ~10-14 px. */
@@ -276,6 +278,7 @@
   </div>
   <div class="panel-body">
     <div class="kv"><div class="k">State</div><div class="v" id="fpState">—</div></div>
+    <div class="kv" id="fpTimerRow" hidden><div class="k">Run timer</div><div class="v mono" id="fpTimerVal">—</div></div>
     <div class="kv" id="fpModeRow"><div class="k">Mode</div>
       <div class="seg" id="fpMode"><button type="button" data-mode="0">Auto</button><button type="button" data-mode="1">Manual</button></div>
       <span class="muted small" id="fpModeUnknown" hidden style="margin-left:8px">Mode unknown</span>
@@ -312,6 +315,7 @@
         <div class="step-banner">
           <span class="mono" id="vStep">—</span><span id="vStepName"></span>
           <div class="actions" style="margin:0 0 0 auto; display:flex; gap:8px; align-items:center;">
+            <span class="pill timer-pill" id="stepTimerBadge" title="Running step timer (t_16)"><span class="dot"></span><span id="stepTimerBadgeText">Step: —</span></span>
             <span class="pill switch-pill html-sim" data-sim-point="System_Switch" id="mainSwitchBadge" title="Main System Switch on PLC panel"><span class="dot"></span><span id="mainSwitchText">Main switch: —</span></span>
             <span class="muted small" id="process-run-status">Run permission: unknown</span>
             <button type="button" class="action" id="hmi-start-btn">Start process</button>
@@ -468,6 +472,8 @@
           <svg class="spark" viewBox="0 0 200 26" preserveAspectRatio="none"><path id="sparkNo3"/></svg></div>
         <div class="kv"><div class="k">Dosing</div><div class="v mono" id="vDosing">—</div></div>
         <div class="kv"><div class="k">Main switch</div><div class="v mono html-sim" data-sim-point="System_Switch" id="vMainSwitch">—</div></div>
+        <div class="kv"><div class="k">Step timer (t_16)</div><div class="v mono" id="vStepTimer">—</div><div class="sub" id="vStepTimerSub"></div></div>
+        <div class="kv"><div class="k">Half-cycle timer</div><div class="v mono" id="vCycleTimer">—</div><div class="sub" id="vCycleTimerSub"></div></div>
         <div class="kv desk-only"><div class="k">TAYA 1 level</div><div class="v mono html-sim" data-sim-point="LT01" id="vLt01">—</div>
           <svg class="spark" viewBox="0 0 200 26" preserveAspectRatio="none"><path id="sparkLt01"/></svg></div>
         <div class="kv desk-only"><div class="k">TAYA 2 level</div><div class="v mono html-sim" data-sim-point="LT02" id="vLt02">—</div>
@@ -1007,6 +1013,39 @@
       setText("vCycles", String(t.C_10));
       setText("vCyclesSub", "Large " + t.C_11 + " · Small " + t.C_12);
     }
+
+    // Running timers
+    var stepTimerText = "—";
+    if (typeof t.t_16 === "number") {
+      stepTimerText = t.t_16 + " s";
+    }
+    setText("vStepTimer", stepTimerText);
+    setText("stepTimerBadgeText", "Step: " + stepTimerText);
+    if (typeof t.Step === "number") {
+      if (t.Step === 104 || t.Step === 108) {
+        setText("vStepTimerSub", "Delay phase");
+      } else if (t.Step === 106) {
+        setText("vStepTimerSub", "P1 pumping" + (typeof t.t_11 === "number" ? " · t_11: " + t.t_11 + " s" : ""));
+      } else if (t.Step === 110) {
+        setText("vStepTimerSub", "P2 pumping" + (typeof t.t_12 === "number" ? " · t_12: " + t.t_12 + " s" : ""));
+      } else if (t.Step === 102) {
+        setText("vStepTimerSub", "Ready / settling");
+      } else if (t.Step === 100) {
+        setText("vStepTimerSub", "Stopped");
+      } else {
+        setText("vStepTimerSub", "");
+      }
+    }
+
+    var halfCycleTimer = t.Cycle_Type === 1 ? t.t_13 : t.t_14;
+    if (typeof halfCycleTimer === "number") {
+      setText("vCycleTimer", halfCycleTimer + " s");
+      setText("vCycleTimerSub", t.Cycle_Type === 1 ? "Large half-cycle (t_13)" : "Small half-cycle (t_14)");
+    } else {
+      setText("vCycleTimer", "—");
+      setText("vCycleTimerSub", "");
+    }
+
     renderPumps(t);
   }
 
@@ -1037,15 +1076,35 @@
     levelFullScaleCm = 160;
     rings = newRings();
     ["mimicLT01Value", "mimicLT02Value", "vLt01", "vLt02", "vNo3", "mimicNo3", "vFlow", "mimicFlow", "vStep",
-     "vDosing", "mimicDosing", "mimicLS0Label", "vCycles"].forEach(function(id){ setText(id, "—"); });
-    ["vNo3Avg", "vStepName", "vCyclesSub"].forEach(function(id){ setText(id, ""); });
+     "vDosing", "mimicDosing", "mimicLS0Label", "vCycles", "vStepTimer", "vCycleTimer", "stepTimerBadgeText"].forEach(function(id){ setText(id, "—"); });
+    ["vNo3Avg", "vStepName", "vCyclesSub", "vStepTimerSub", "vCycleTimerSub"].forEach(function(id){ setText(id, ""); });
     setBar("mimicLT01Bar", 0); setBar("mimicLT02Bar", 0);
     ["sparkFlow", "sparkNo3", "sparkLt01", "sparkLt02"].forEach(function(id){ $(id).setAttribute("d", ""); });
     $("mimicLS0").classList.remove("fault");
     renderPumps({});
   }
 
-  document.addEventListener("hmi:telemetry", function(e){ render(e.detail); });
+  var lastTeleAt = 0;
+  var lastT16 = null;
+
+  document.addEventListener("hmi:telemetry", function(e){
+    if (typeof e.detail.t_16 === "number") {
+      lastT16 = e.detail.t_16;
+      lastTeleAt = Date.now();
+    }
+    render(e.detail);
+  });
+
+  setInterval(function(){
+    if (!$("page-overview") || $("page-overview").hidden) return;
+    if (lastT16 === null || lastTeleAt === 0) return;
+    var t = window.__hmiLastTelemetry;
+    if (!t || t.Step === 100) return;
+    var elapsed = Math.floor((Date.now() - lastTeleAt) / 1000);
+    var liveT16 = lastT16 + elapsed;
+    setText("vStepTimer", liveT16 + " s");
+    setText("stepTimerBadgeText", "Step: " + liveT16 + " s");
+  }, 1000);
   document.addEventListener("hmi:page", function(e){ if (e.detail === "overview") refreshOverviewReads(); });
   document.addEventListener("hmi:signout", resetOverview);
   setInterval(function(){
@@ -1078,6 +1137,19 @@
     $("fpTitle").textContent = NAMES[current];
     $("fpState").textContent = (s.fault ? "Fault · " : "") + (s.running ? "Running" : "Stopped");
     $("fpState").style.color = s.fault ? "var(--critical)" : "";
+
+    var fpTimerRow = $("fpTimerRow");
+    if (fpTimerRow) {
+      if (current === "P1" && typeof t.t_11 === "number") {
+        fpTimerRow.hidden = false;
+        $("fpTimerVal").textContent = t.t_11 + " s";
+      } else if (current === "P2" && typeof t.t_12 === "number") {
+        fpTimerRow.hidden = false;
+        $("fpTimerVal").textContent = t.t_12 + " s";
+      } else {
+        fpTimerRow.hidden = true;
+      }
+    }
 
     $("fpModeRow").hidden = isDp;
     $("fpDpModeRow").hidden = !isDp;
@@ -1215,6 +1287,7 @@
       row.className = "sp-row";
       row.innerHTML =
         '<label for="sp-input-' + sp.name + '"><span></span> <span class="mono muted small">' + sp.name + '</span></label>' +
+        '<span class="sp-pv" id="sp-pv-' + sp.name + '" title="Current live value">Current: —</span>' +
         '<input id="sp-input-' + sp.name + '" type="text" inputmode="numeric" autocomplete="off">' +
         '<span class="muted small">' + sp.unit + '</span>' +
         '<div class="err" id="sp-err-' + sp.name + '" hidden></div>';
@@ -1305,9 +1378,24 @@
     });
   });
   $("spDiscard").addEventListener("click", function(){ edited = {}; fillInputs(); updateReviewBar(); });
+  function updateSetpointsLive(t){
+    if (!t) return;
+    HmiLogic.PROCESS_SETPOINTS.forEach(function(sp){
+      var el = $("sp-pv-" + sp.name);
+      if (el) {
+        var coils = window.hmiOverviewCoils ? window.hmiOverviewCoils() : {};
+        var val = HmiLogic.currentValueForSetpoint(sp.name, t, coils);
+        el.textContent = "Current: " + val;
+      }
+    });
+  }
+
+  document.addEventListener("hmi:telemetry", function(e){ updateSetpointsLive(e.detail); });
+
   $("spRefreshBtn").addEventListener("click", function(){ refresh(); });
   document.addEventListener("hmi:page", function(e){
     if (e.detail !== "setpoints") return;
+    if (window.__hmiLastTelemetry) updateSetpointsLive(window.__hmiLastTelemetry);
     // Returning to the page must not throw away unsaved edits; the
     // explicit "Reload values" button still re-reads and discards them.
     if (Object.keys(edited).length && window.hmiIsOperator()) {
