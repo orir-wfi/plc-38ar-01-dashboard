@@ -276,9 +276,21 @@
   </div>
   <div class="panel-body">
     <div class="kv"><div class="k">State</div><div class="v" id="fpState">—</div></div>
-    <div class="kv"><div class="k">Mode</div>
+    <div class="kv" id="fpModeRow"><div class="k">Mode</div>
       <div class="seg" id="fpMode"><button type="button" data-mode="0">Auto</button><button type="button" data-mode="1">Manual</button></div>
       <span class="muted small" id="fpModeUnknown" hidden style="margin-left:8px">Mode unknown</span>
+    </div>
+    <div class="kv" id="fpDpModeRow" hidden style="align-items:flex-start">
+      <div class="k" style="padding-top:4px">Mode</div>
+      <div style="flex:1">
+        <div class="seg" id="fpDpMode" style="display:flex; flex-direction:column; width:100%; border:1px solid var(--border); border-radius:8px; overflow:hidden">
+          <button type="button" data-dpmode="manual" style="padding:7px 10px; border-bottom:1px solid var(--border); text-align:left">Manual</button>
+          <button type="button" data-dpmode="auto-no3" style="padding:7px 10px; border-bottom:1px solid var(--border); text-align:left">Auto (NO3)</button>
+          <button type="button" data-dpmode="auto-fixed" style="padding:7px 10px; text-align:left">Auto (fixed flow)</button>
+        </div>
+        <span class="muted small" id="fpDpModeUnknown" hidden style="display:block; margin-top:4px">Mode unknown</span>
+        <div class="muted small" id="fpDpRate" style="margin-top:6px"></div>
+      </div>
     </div>
     <div class="kv" id="fpManual" hidden>
       <div class="k">Manual control</div>
@@ -1059,17 +1071,43 @@
   function render(){
     if (!current) return;
     var t = window.__hmiLastTelemetry || {};
-    var s = HmiLogic.pumpState(current, t, window.hmiOverviewCoils());
+    var coils = window.hmiOverviewCoils();
+    var s = HmiLogic.pumpState(current, t, coils);
     var op = window.hmiIsOperator();
+    var isDp = current === "DP1";
     $("fpTitle").textContent = NAMES[current];
     $("fpState").textContent = (s.fault ? "Fault · " : "") + (s.running ? "Running" : "Stopped");
     $("fpState").style.color = s.fault ? "var(--critical)" : "";
-    document.querySelectorAll("#fpMode button").forEach(function(b){
-      // manual === null (mode coil not read): highlight neither segment.
-      b.classList.toggle("on", s.manual !== null && Number(b.dataset.mode) === (s.manual ? 1 : 0));
-      b.disabled = !op;
-    });
-    $("fpModeUnknown").hidden = s.manual !== null;
+
+    $("fpModeRow").hidden = isDp;
+    $("fpDpModeRow").hidden = !isDp;
+
+    if (isDp) {
+      var dpManual = s.manual;
+      var b14 = typeof coils.B14 === "number" ? coils.B14 : null;
+      var activeDpMode = null;
+      if (dpManual === true) activeDpMode = "manual";
+      else if (dpManual === false && b14 === 1) activeDpMode = "auto-no3";
+      else if (dpManual === false && b14 === 0) activeDpMode = "auto-fixed";
+
+      document.querySelectorAll("#fpDpMode button").forEach(function(b){
+        b.classList.toggle("on", activeDpMode !== null && b.dataset.dpmode === activeDpMode);
+        b.disabled = !op;
+      });
+      $("fpDpModeUnknown").hidden = activeDpMode !== null;
+      var rateText = "";
+      if (activeDpMode === "auto-no3") rateText = "Target flow (by NO3): " + (t.Dosing_Flow || 0) + " mL/h (SP_F02)";
+      else if (activeDpMode === "auto-fixed") rateText = "Target flow (fixed): " + (t.Dosing_Flow || 0) + " mL/h (SP_F01)";
+      else if (activeDpMode === "manual") rateText = "Manual flow: " + (t.Dosing_Flow || 0) + " mL/h (SP_F01)";
+      $("fpDpRate").textContent = rateText;
+    } else {
+      document.querySelectorAll("#fpMode button").forEach(function(b){
+        b.classList.toggle("on", s.manual !== null && Number(b.dataset.mode) === (s.manual ? 1 : 0));
+        b.disabled = !op;
+      });
+      $("fpModeUnknown").hidden = s.manual !== null;
+    }
+
     $("fpManual").hidden = s.manual !== true;
     $("fpStart").disabled = !op || s.running;
     $("fpStop").disabled = !op || !s.running;
@@ -1111,6 +1149,36 @@
     b.addEventListener("click", function(){
       var m = Number(b.dataset.mode);
       write(current + "_Mode", m, "Switch " + current + " to " + (m === 1 ? "Manual" : "Auto") + "?");
+    });
+  });
+  document.querySelectorAll("#fpDpMode button").forEach(function(b){
+    b.addEventListener("click", function(){
+      var modeKey = b.dataset.dpmode;
+      clearTimeout(idleTimer);
+      var msg = "";
+      var writes = [];
+      if (modeKey === "manual") {
+        msg = "Switch DP1 to Manual?";
+        writes = [{ point: "DP1_Mode", value: 1 }];
+      } else if (modeKey === "auto-no3") {
+        msg = "Switch DP1 to Auto (by NO3 meter)?";
+        writes = [{ point: "DP1_Mode", value: 0 }, { point: "B14", value: 1 }];
+      } else if (modeKey === "auto-fixed") {
+        msg = "Switch DP1 to Auto (fixed flow SP_F01)?";
+        writes = [{ point: "DP1_Mode", value: 0 }, { point: "B14", value: 0 }];
+      }
+      window.hmiConfirm(msg).then(function(ok){
+        armIdle();
+        if (!ok) return;
+        $("fpResult").textContent = "Sending…";
+        window.sendDashBatchWrite(writes, function(resp){
+          $("fpResult").textContent = resp.ok ? "Done." : ("Failed: " + resp.error);
+          if (resp.ok) {
+            writes.forEach(function(w){ window.hmiSetCoil(w.point, w.value); });
+          }
+          render();
+        });
+      });
     });
   });
   $("fpStart").addEventListener("click", function(){ write(current + "_ON", 1, "Start " + current + " manually?"); });
