@@ -158,7 +158,7 @@
     { name: 'Reset_Inactive_Alarms', label: 'Reset button', kind: 'digital',
       options: [{ value: 1, label: '1 (pressed)' }, { value: 0, label: '0 (released)' }] },
     { name: 'LS0_low', label: 'Sugar tank level switch (LS0)', kind: 'digital',
-      options: [{ value: 1, label: '1 (level OK)' }, { value: 0, label: '0 (LOW)' }] },
+      options: [{ value: 0, label: '0 (level OK)' }, { value: 1, label: '1 (LOW)' }] },
     { name: 'FT101_P', label: 'Inlet flow pulse (FT101)', kind: 'digital', options: ON_OFF },
     { name: 'LT01', label: 'TAYA 1 level (LT01)', kind: 'analog', unit: 'cm', min: 0, max: 400 },
     { name: 'LT02', label: 'TAYA 2 level (LT02)', kind: 'analog', unit: 'cm', min: 0, max: 400 },

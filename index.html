@@ -987,7 +987,7 @@
     setText("vDosing", dosing);
     setText("mimicDosing", typeof t.Dosing_Flow === "number" ? t.Dosing_Flow + " mL/h" : "—");
     if (typeof t.LS0_low === "number") {
-      var ok = t.LS0_low === 1; // active-low: 1 = normal, 0 = low
+      var ok = t.LS0_low === 0; // 0 = high (level OK), 1 = low
       setText("mimicLS0Label", ok ? "Level OK" : "LOW");
       $("mimicLS0").classList.toggle("fault", !ok);
     }
