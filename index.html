@@ -2090,46 +2090,114 @@
   renderToggles();
 
   var dosingModeState = {};
+  var DOSING_MODES = [
+    { id: "manual", label: "Manual", desc: "Manual control: uses fixed flow setpoint (SP_F01). Run/stop controlled manually from Overview faceplate." },
+    { id: "auto-no3", label: "Auto (NO3)", desc: "Auto (NO3): sequencer-controlled dosing rate adjusted dynamically by NO3 meter (SP_F02)." },
+    { id: "auto-fixed", label: "Auto (fixed flow)", desc: "Auto (fixed flow): sequencer-controlled dosing with fixed flow setpoint (SP_F01)." }
+  ];
+
+  function getActiveDosingMode(){
+    if (typeof dosingModeState.DP1_Mode !== "number" || typeof dosingModeState.B14 !== "number") {
+      var ovCoils = (typeof window.hmiOverviewCoils === "function") ? window.hmiOverviewCoils() : {};
+      if (typeof dosingModeState.DP1_Mode !== "number" && typeof ovCoils.DP1_Mode === "number") dosingModeState.DP1_Mode = ovCoils.DP1_Mode;
+      if (typeof dosingModeState.B14 !== "number" && typeof ovCoils.B14 === "number") dosingModeState.B14 = ovCoils.B14;
+    }
+    if (typeof dosingModeState.DP1_Mode !== "number" || typeof dosingModeState.B14 !== "number") return null;
+    if (dosingModeState.DP1_Mode === 1) return "manual";
+    if (dosingModeState.DP1_Mode === 0 && dosingModeState.B14 === 1) return "auto-no3";
+    if (dosingModeState.DP1_Mode === 0 && dosingModeState.B14 === 0) return "auto-fixed";
+    return null;
+  }
+
   function renderDosingMode(){
     var el = document.getElementById("dosingModeControl");
+    if (!el) return;
     el.innerHTML = "";
-    var btn = document.createElement("button");
-    btn.className = "action";
-    btn.type = "button";
-    if (typeof dosingModeState.B14 !== "number") {
-      btn.textContent = "Mode: unknown";
-      btn.disabled = true;
-      el.appendChild(btn);
-      return;
-    }
-    var isAuto = dosingModeState.B14 === 1; // B14: 1 = auto (by NO3 meter), 0 = manual
-    btn.textContent = "Mode: " + (isAuto ? "Auto (by NO3 meter)" : "Manual (SP_F01)") + " · switch";
-    btn.disabled = !op;
-    btn.addEventListener("click", function(){
-      window.hmiConfirm("Switch dosing to " + (isAuto ? "Manual (fixed SP_F01 flow)" : "Auto (by NO3 meter)") + "?").then(function(ok){
-        if (!ok) return;
-        var resultEl = document.getElementById("dosingModeResult");
-        resultEl.textContent = "Sending…";
-        sendDashCommand("coil", { point: "B14", value: isAuto ? 0 : 1 }, function(resp){
-          if (resp.ok) {
-            dosingModeState.B14 = isAuto ? 0 : 1; renderDosingMode(); resultEl.textContent = "Done.";
-            if (window.hmiSetCoil) window.hmiSetCoil("B14", isAuto ? 0 : 1);
-          } else resultEl.textContent = "Failed: " + (resp.error || "unknown");
+
+    var activeMode = getActiveDosingMode();
+
+    var seg = document.createElement("div");
+    seg.className = "seg";
+    seg.setAttribute("role", "radiogroup");
+    seg.setAttribute("aria-label", "Dosing pump mode");
+
+    DOSING_MODES.forEach(function(m){
+      var btn = document.createElement("button");
+      btn.type = "button";
+      btn.dataset.dpmode = m.id;
+      btn.textContent = m.label;
+      if (activeMode !== null && activeMode === m.id) {
+        btn.classList.add("on");
+        btn.setAttribute("aria-checked", "true");
+      } else {
+        btn.setAttribute("aria-checked", "false");
+      }
+      btn.disabled = !op;
+      btn.addEventListener("click", function(){
+        if (activeMode === m.id) return;
+        var msg = "";
+        var writes = [];
+        if (m.id === "manual") {
+          msg = "Switch dosing (DP1) to Manual?";
+          writes = [{ point: "DP1_Mode", value: 1 }];
+        } else if (m.id === "auto-no3") {
+          msg = "Switch dosing (DP1) to Auto (by NO3 meter)?";
+          writes = [{ point: "DP1_Mode", value: 0 }, { point: "B14", value: 1 }];
+        } else if (m.id === "auto-fixed") {
+          msg = "Switch dosing (DP1) to Auto (fixed flow SP_F01)?";
+          writes = [{ point: "DP1_Mode", value: 0 }, { point: "B14", value: 0 }];
+        }
+        window.hmiConfirm(msg).then(function(ok){
+          if (!ok) return;
+          var resultEl = document.getElementById("dosingModeResult");
+          resultEl.textContent = "Sending…";
+          window.sendDashBatchWrite(writes, function(resp){
+            if (resp.ok) {
+              writes.forEach(function(w){
+                dosingModeState[w.point] = w.value;
+                if (window.hmiSetCoil) window.hmiSetCoil(w.point, w.value);
+              });
+              renderDosingMode();
+              resultEl.textContent = "Done.";
+            } else {
+              resultEl.textContent = "Failed: " + (resp.error || "unknown");
+            }
+          });
         });
       });
+      seg.appendChild(btn);
     });
-    el.appendChild(btn);
+
+    el.appendChild(seg);
+
+    var note = document.createElement("div");
+    note.className = "muted small";
+    note.style.marginTop = "6px";
+    if (activeMode === null) {
+      note.textContent = "Mode unknown — sign in as operator to read and set dosing mode.";
+    } else {
+      var descText = "";
+      for (var i = 0; i < DOSING_MODES.length; i++) {
+        if (DOSING_MODES[i].id === activeMode) { descText = DOSING_MODES[i].desc; break; }
+      }
+      note.textContent = descText;
+    }
+    el.appendChild(note);
   }
   renderDosingMode();
 
   function refreshSystemReads(){
-    readPoints(["Ethernet_Disabled", "WiFi_Disabled", "LTE_Disabled", "B14"], function(resp){
+    readPoints(["Ethernet_Disabled", "WiFi_Disabled", "LTE_Disabled", "B14", "DP1_Mode"], function(resp){
       if (!resp.ok) {
         document.getElementById("transportResult").textContent = "Could not read transport and dosing state: " + (resp.error || "unknown");
         return;
       }
       Object.assign(toggleState, resp.values);
       Object.assign(dosingModeState, resp.values);
+      if (window.hmiSetCoil) {
+        if (typeof resp.values.B14 === "number") window.hmiSetCoil("B14", resp.values.B14);
+        if (typeof resp.values.DP1_Mode === "number") window.hmiSetCoil("DP1_Mode", resp.values.DP1_Mode);
+      }
       renderToggles();
       renderDosingMode();
     });
