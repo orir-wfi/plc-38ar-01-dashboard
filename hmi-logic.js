@@ -149,7 +149,7 @@
   }
 
   // Same order as the firmware's SIM_POINTS / *_Sim coils 17-23:
-  // bit n of telemetry Sim_Mask = SIM_POINTS[n].
+  // bit (n+1) of telemetry Sim_Mask = SIM_POINTS[n]; bit 0 unused.
   // Digital points carry their own option labels: LS0_low is active-low
   // (1 = level OK, 0 = LOW), so a generic "on/off" would mislead.
   const ON_OFF = [{ value: 1, label: '1 (on)' }, { value: 0, label: '0 (off)' }];
@@ -166,7 +166,7 @@
   ];
   function simPointsFromMask(mask) {
     const out = [];
-    SIM_POINTS.forEach((p, i) => { if ((mask >>> i) & 1) out.push(p.name); });
+    SIM_POINTS.forEach((p, i) => { if ((mask >>> (i + 1)) & 1) out.push(p.name); });
     return out;
   }
   // Value first, then the enable coil, in one atomic dash batch - so the
@@ -321,7 +321,7 @@
       FaultBitmask: (1 << 1) | (1 << 9) | (1 << 17), LT01: 168, AIT01_NO3: 38,
     }),
     sim: Object.assign({}, DEMO_BASE, {
-      Sim_Mask: (1 << 2) | (1 << 4), LT01: 120, LT01_Raw: 85, LS0_low: 1, LS0_low_Raw: 0,
+      Sim_Mask: (1 << 3) | (1 << 5), LT01: 120, LT01_Raw: 85, LS0_low: 1, LS0_low_Raw: 0,
     }),
   };
 
