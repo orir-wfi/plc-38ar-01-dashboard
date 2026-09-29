@@ -52,6 +52,9 @@
   .pill .dot{ width:7px; height:7px; border-radius:50%; background:var(--ink-3); }
   .pill.stale{ color:var(--warning); border-color:var(--warning); } .pill.stale .dot{ background:var(--warning); }
   .pill.down{ color:var(--critical); border-color:var(--critical); } .pill.down .dot{ background:var(--critical); }
+  .pill.on{ color:var(--accent); border-color:var(--accent); } .pill.on .dot{ background:var(--accent); }
+  .pill.off{ color:var(--critical); border-color:var(--critical); background:var(--critical-tint); } .pill.off .dot{ background:var(--critical); }
+  .switch-pill{ padding:3px 9px; font-size:12px; }
   .alarm-btn{ font:inherit; font-size:13px; font-weight:600; border:1px solid var(--border); background:var(--surface); color:var(--ink-2); padding:5px 12px; border-radius:8px; cursor:pointer; }
   .alarm-btn.active{ border:2px solid var(--critical); color:var(--critical); background:var(--critical-tint); }
   .lastseen{ font-size:11.5px; color:var(--ink-3); padding:4px 16px 0; max-width:1100px; margin:0 auto; }
@@ -225,6 +228,7 @@
     <button type="button" data-page="system">System</button>
   </nav>
   <div class="hdr-right">
+    <span class="pill html-sim" data-sim-point="System_Switch" id="hdrSwitchPill" title="Main System Switch on PLC panel"><span class="dot"></span><span id="hdrSwitchText">Main switch: —</span></span>
     <span class="pill" id="statusPill"><span class="dot"></span><span id="statusText">Not connected</span></span>
     <button type="button" class="alarm-btn" id="alarmBtn">No alarms</button>
   </div>
@@ -296,6 +300,7 @@
         <div class="step-banner">
           <span class="mono" id="vStep">—</span><span id="vStepName"></span>
           <div class="actions" style="margin:0 0 0 auto; display:flex; gap:8px; align-items:center;">
+            <span class="pill switch-pill html-sim" data-sim-point="System_Switch" id="mainSwitchBadge" title="Main System Switch on PLC panel"><span class="dot"></span><span id="mainSwitchText">Main switch: —</span></span>
             <span class="muted small" id="process-run-status">Run permission: unknown</span>
             <button type="button" class="action" id="hmi-start-btn">Start process</button>
             <button type="button" class="action" id="hmi-stop-btn">Stop process</button>
@@ -450,6 +455,7 @@
         <div class="kv"><div class="k">NO3</div><div class="v mono html-sim" data-sim-point="AIT01_NO3" id="vNo3">—</div><div class="sub" id="vNo3Avg"></div>
           <svg class="spark" viewBox="0 0 200 26" preserveAspectRatio="none"><path id="sparkNo3"/></svg></div>
         <div class="kv"><div class="k">Dosing</div><div class="v mono" id="vDosing">—</div></div>
+        <div class="kv"><div class="k">Main switch</div><div class="v mono html-sim" data-sim-point="System_Switch" id="vMainSwitch">—</div></div>
         <div class="kv desk-only"><div class="k">TAYA 1 level</div><div class="v mono html-sim" data-sim-point="LT01" id="vLt01">—</div>
           <svg class="spark" viewBox="0 0 200 26" preserveAspectRatio="none"><path id="sparkLt01"/></svg></div>
         <div class="kv desk-only"><div class="k">TAYA 2 level</div><div class="v mono html-sim" data-sim-point="LT02" id="vLt02">—</div>
@@ -709,6 +715,25 @@
     });
   };
 
+  function updateMainSwitch(status){
+    var on = status && status.on, known = status && status.known;
+    ["hdrSwitchPill", "mainSwitchBadge"].forEach(function(id){
+      var el = $(id);
+      if (!el) return;
+      el.classList.toggle("on", known && on);
+      el.classList.toggle("off", known && !on);
+    });
+    ["hdrSwitchText", "mainSwitchText"].forEach(function(id){
+      var el = $(id);
+      if (el) el.textContent = known ? (on ? "Main switch: ON" : "Main switch: OFF") : "Main switch: —";
+    });
+    var vEl = $("vMainSwitch");
+    if (vEl) {
+      vEl.textContent = known ? (on ? "ON" : "OFF") : "—";
+      vEl.style.color = known ? (on ? "var(--accent)" : "var(--critical)") : "";
+    }
+  }
+
   function renderHeader(t){
     var s = HmiLogic.alarmSummary(t.FaultBitmask);
     els.alarmBtn.textContent = (s.count ? "▲ " : "") + s.text;
@@ -719,6 +744,7 @@
     document.querySelectorAll("[data-sim-point]").forEach(function(el){
       el.classList.toggle("is-sim", sims.indexOf(el.getAttribute("data-sim-point")) >= 0);
     });
+    updateMainSwitch(HmiLogic.mainSwitchStatus(t));
   }
 
   function applyTelemetry(json){

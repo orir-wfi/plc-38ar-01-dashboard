@@ -274,6 +274,12 @@
     return { applied: failed.length === 0, partial: failed.length > 0, failed, error: null };
   }
 
+  function mainSwitchStatus(t) {
+    if (!t || typeof t.System_Switch !== 'number') return { known: false, on: false, text: 'Main switch: unknown' };
+    const on = t.System_Switch === 1;
+    return { known: true, on, text: on ? 'Main switch: ON' : 'Main switch: OFF' };
+  }
+
   function alarmSummary(bitmask) {
     const n = typeof bitmask === 'number' ? decodeFaultBitmask(bitmask).length : 0;
     return { count: n, text: n === 0 ? 'No alarms' : (n === 1 ? '1 alarm' : n + ' alarms') };
@@ -702,7 +708,7 @@
     packEmailToRegisters, unpackRegistersToEmail,
     STEP_NAMES, stepName, stepLabel, stepDescription,
     SIM_POINTS, simPointsFromMask, simEnableWrites, realValue, simValueText, simConfirmMessage,
-    validateNumber, setpointDiff, pumpState, dosingText, batchOutcome, alarmSummary,
+    validateNumber, setpointDiff, pumpState, dosingText, batchOutcome, alarmSummary, mainSwitchStatus,
     createRing, sparklinePath, DEMO_FRAMES, describeBoot, sdCardStatus,
     historyWindow, historyWindowAt, historyStepSeconds, createHistoryAssembler, historyColumns,
     historyAppendLive, telemetryToHistoryRow, historyEventText, historyErrorText, historyNeedsReload, historyStillBusy, stepShade, demoHistoryChunks,
