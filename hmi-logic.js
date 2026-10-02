@@ -543,6 +543,35 @@
     return !!busy && ageMs < 10000;
   }
 
+  // EMQX free tier (2026-10-02): the PLC only sends telemetry while a tab
+  // heartbeats plc/<dev>/watch, so a forgotten tab must let go. hiddenForMs
+  // is null while the tab is visible. busy = a trend load or a confirm
+  // dialog in progress - never cut those off.
+  const HIDDEN_PAUSE_MS = 60000;
+  const IDLE_PAUSE_MS = 15 * 60000;
+  function hmiPauseReason(s) {
+    if (s.busy) return null;
+    if (s.hiddenForMs != null && s.hiddenForMs >= HIDDEN_PAUSE_MS) return 'hidden';
+    if (s.idleForMs >= IDLE_PAUSE_MS) return 'idle';
+    return null;
+  }
+
+  // True once the first heartbeat of this connection has gone unanswered
+  // for 10 s (PLC offline, or the login lacks publish rights on watch).
+  function plcNotAnswering(watchSentAt, lastTelemetryAt, now) {
+    if (watchSentAt == null) return false;
+    if (lastTelemetryAt != null && lastTelemetryAt >= watchSentAt) return false;
+    return now - watchSentAt >= 10000;
+  }
+
+  // A browser that saved its login before the broker move still points at
+  // HiveMQ Cloud (retired 2026-12-31) - repoint it, keep any other host.
+  function migrateSavedLogin(saved, host, port) {
+    if (!saved) return saved;
+    if (!/\.hivemq\.cloud$/i.test(saved.host || '')) return saved;
+    return Object.assign({}, saved, { host: host, port: port });
+  }
+
   // Neutral grays by step (ISA-101: no alarm colours).
   const STEP_SHADES = { 100: '#b3b8bb', 102: '#e3e5e6', 104: '#c8cccd', 106: '#8f989c', 108: '#c8cccd', 110: '#6f787c' };
   function stepShade(step) { return STEP_SHADES[step] || '#d5d8d9'; }
@@ -794,6 +823,7 @@
     createRing, sparklinePath, DEMO_FRAMES, describeBoot, sdCardStatus,
     historyWindow, historyWindowAt, historyStepSeconds, createHistoryAssembler, historyColumns,
     historyAppendLive, telemetryToHistoryRow, historyEventText, historyErrorText, historyNeedsReload, historyStillBusy, stepShade, demoHistoryChunks,
+    HIDDEN_PAUSE_MS, IDLE_PAUSE_MS, hmiPauseReason, plcNotAnswering, migrateSavedLogin,
     emailRequestWrites, emailResetWrites, dailyEmailResultText,
     CAL_INSTRUMENTS, PROCESS_SETPOINTS, averageLast, currentValueFromMilliamps, zeroAdjust, twoPointRange, validateRange, validateRawCapture, validateElectrical, calibrationConfirmText,
     currentValueForSetpoint,

@@ -273,6 +273,13 @@
   </div>
 </dialog>
 
+<dialog class="confirm" id="pauseDialog">
+  <p id="pauseText">Paused to save data.</p>
+  <div class="dlg-actions">
+    <button type="button" class="primary" id="pauseResume">Resume</button>
+  </div>
+</dialog>
+
 <div class="faceplate" id="faceplate" hidden role="dialog" aria-labelledby="fpTitle">
   <div class="panel-head">
     <h2 id="fpTitle">—</h2>
@@ -657,9 +664,9 @@
 <script>
 (function(){
   var DEVICE_ID = "plc-38ar-01";
-  var DEFAULT_HOST = "fdb8d122153b4af382840aa79d99f51f.s1.eu.hivemq.cloud";
-  var DEFAULT_PORT = "8884";
-  var OPERATOR_USERNAME = "SS2-operator"; // matches whichever username orir provisions as the write-capable credential on HiveMQ - update here if it differs
+  var DEFAULT_HOST = "c1866c89.ala.eu-central-1.emqxsl.com"; // EMQX Serverless (2026-10)
+  var DEFAULT_PORT = "8084";
+  var OPERATOR_USERNAME = "SS2-operator"; // matches whichever username orir provisions as the write-capable credential on the broker - update here if it differs
   var TOPIC_TELEMETRY = "plc/" + DEVICE_ID + "/telemetry";
   var TOPIC_ALERTS = "plc/" + DEVICE_ID + "/alerts";
   var TOPIC_BOOT = "plc/" + DEVICE_ID + "/boot"; // retained, one per PLC boot (firmware v6+)
@@ -667,6 +674,11 @@
   var TOPIC_DASH_STATUS = "plc/" + DEVICE_ID + "/dash/status";
   var TOPIC_DASH_HIST = "plc/" + DEVICE_ID + "/dash/hist";
   var TOPIC_DEBUG = "plc/" + DEVICE_ID + "/debug";
+  // The PLC publishes telemetry only while this heartbeat keeps arriving
+  // (firmware v29+, telemetry_gate.h) - its window is 75 s, so 30 s here
+  // survives one lost heartbeat.
+  var TOPIC_WATCH = "plc/" + DEVICE_ID + "/watch";
+  var WATCH_EVERY_MS = 30000;
   var STALE_MS = 90000;
   var STORE_KEY = "plchmi.plc-38ar-01.login";
   var PAGES = ["overview", "trends", "setpoints", "alarms", "system"];
@@ -675,6 +687,9 @@
   var isOperator = false;
   var lastSeenAt = null;
   var pendingRequests = {};
+  var watchTimer = null, watchSentAt = null;
+  var hiddenSince = document.hidden ? Date.now() : null, lastInputAt = Date.now();
+  var paused = false;
   window.__hmiLastTelemetry = null;
   window.hmiIsOperator = function(){ return isOperator; };
 
@@ -692,6 +707,9 @@
   function setStatus(kind, text){ els.statusPill.className = "pill " + kind; els.statusText.textContent = text; }
 
   function checkFreshness(){
+    if(client && client.connected && HmiLogic.plcNotAnswering(watchSentAt, lastSeenAt, Date.now())){
+      setStatus("stale", "PLC not answering");
+    }
     if(!lastSeenAt){ els.lastSeen.textContent = "No telemetry received yet"; return; }
     var secs = Math.round((Date.now() - lastSeenAt) / 1000);
     els.lastSeen.textContent = "Last telemetry " + secs + " s ago";
@@ -823,6 +841,60 @@
     return window.sendDashCommand("history", extra, onResult);
   };
 
+  function stopWatch(){
+    if (watchTimer) { clearInterval(watchTimer); watchTimer = null; }
+    watchSentAt = null;
+  }
+  function startWatch(){
+    stopWatch();
+    function beat(){ if (client && client.connected) client.publish(TOPIC_WATCH, "1"); }
+    beat();
+    watchSentAt = Date.now();
+    watchTimer = setInterval(beat, WATCH_EVERY_MS);
+  }
+
+  // Free-tier broker budget: a hidden or untouched tab disconnects, so the
+  // PLC stops sending telemetry nobody is looking at.
+  function pause(reason){
+    paused = true;
+    stopWatch();
+    if (client) { client.end(true); client = null; }
+    $("pauseText").textContent = reason === "hidden"
+      ? "Paused to save data while this tab was in the background."
+      : "Paused to save data after 15 minutes without activity.";
+    setStatus("", "Paused");
+    var d = $("pauseDialog");
+    if (!d.open) d.showModal();
+  }
+  function resume(){
+    var d = $("pauseDialog");
+    if (d.open) d.close();
+    if (!paused) return;
+    paused = false;
+    lastInputAt = Date.now();
+    var saved = loadLogin();
+    if (saved && saved.user) connect(saved); else showSignin();
+  }
+  $("pauseResume").addEventListener("click", resume);
+  $("pauseDialog").addEventListener("cancel", function(e){ e.preventDefault(); resume(); });
+  function checkPause(){
+    if (paused || !client || window.__hmiDemo) return;
+    var busy = (window.hmiTrendsBusy && window.hmiTrendsBusy()) || els.confirmDialog.open;
+    var now = Date.now();
+    var reason = HmiLogic.hmiPauseReason({
+      hiddenForMs: hiddenSince == null ? null : now - hiddenSince,
+      idleForMs: now - lastInputAt, busy: busy
+    });
+    if (reason) pause(reason);
+  }
+  ["pointerdown", "keydown", "wheel", "touchstart"].forEach(function(ev){
+    document.addEventListener(ev, function(){ lastInputAt = Date.now(); }, { passive: true, capture: true });
+  });
+  document.addEventListener("visibilitychange", function(){
+    hiddenSince = document.hidden ? Date.now() : null;
+    if (!document.hidden) lastInputAt = Date.now(); // coming back counts as activity
+  });
+
   function connect(login){
     els.connError.classList.remove("show");
     els.connectBtn.disabled = true; els.connectBtn.textContent = "Signing in…";
@@ -849,6 +921,7 @@
       if (isOperator) topics.push(TOPIC_DASH_STATUS, TOPIC_DASH_HIST, TOPIC_DEBUG);
       client.subscribe(topics, function(err){
         if(err){ els.connError.textContent = "Connected, but subscribe failed: " + err.message; els.connError.classList.add("show"); }
+        startWatch(); // after subscribing, so the PLC's immediate reply isn't missed
         // Once subscribed (so dash replies can arrive): show Overview after a
         // fresh sign-in, otherwise re-announce the page already on screen so
         // its operator reads run now - covers a reload with a saved login
@@ -879,7 +952,10 @@
       }
     });
     client.on("reconnect", function(){ setStatus("stale", "Reconnecting…"); });
-    client.on("close", function(){ if(els.statusText.textContent !== "Not connected") setStatus("down", "Disconnected"); });
+    client.on("close", function(){
+      stopWatch();
+      if(els.statusText.textContent !== "Not connected" && !paused) setStatus("down", "Disconnected");
+    });
     client.on("error", function(err){
       els.connError.textContent = "Broker error: " + (err && err.message ? err.message : String(err));
       els.connError.classList.add("show"); setStatus("down", "Connection error");
@@ -890,6 +966,8 @@
 
   window.hmiSignOut = function(){
     try{ localStorage.removeItem(STORE_KEY); }catch(e){}
+    stopWatch(); paused = false;
+    if ($("pauseDialog").open) $("pauseDialog").close();
     if (client) { client.end(true); client = null; }
     isOperator = false;
     Object.keys(pendingRequests).forEach(function(id){ delete pendingRequests[id]; });
@@ -930,13 +1008,14 @@
     if (panel) panel.scrollIntoView({ behavior: "smooth", block: "start" });
   });
 
-  setInterval(checkFreshness, 5000);
+  setInterval(function(){ checkFreshness(); checkPause(); }, 5000);
 
   // ?demo=<frame>: render a canned telemetry frame without a broker, for
   // screenshots and design review (frames in hmi-logic.js DEMO_FRAMES).
   var demo = new URLSearchParams(location.search).get("demo");
   window.__hmiDemo = !!(demo && HmiLogic.DEMO_FRAMES && HmiLogic.DEMO_FRAMES[demo]);
-  var saved = loadLogin();
+  var saved = HmiLogic.migrateSavedLogin(loadLogin(), DEFAULT_HOST, DEFAULT_PORT);
+  if (saved) saveLogin(saved);
   els.fHost.value = (saved && saved.host) || DEFAULT_HOST;
   els.fPort.value = (saved && saved.port) || DEFAULT_PORT;
   if (demo && HmiLogic.DEMO_FRAMES && HmiLogic.DEMO_FRAMES[demo]) {
