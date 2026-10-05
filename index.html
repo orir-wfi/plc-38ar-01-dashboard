@@ -1181,7 +1181,11 @@
 
     if (typeof t.Step === "number") {
       if (t.Step === 104 || t.Step === 108) {
-        setHtml("vStepTimerSub", "Delay phase" + (target ? ' (SP: <b class="timer-sp">' + target.sp + '</b> s)' : ""));
+        // The delay SP is calculated, not T_16: half-cycle SP minus the pump's run time.
+        var hcName = t.Cycle_Type === 1 ? "T_13" : "T_14";
+        var runName = t.Step === 104 ? "P1" : "P2";
+        var runVal = t.Step === 104 ? t.t_11 : t.t_12;
+        setHtml("vStepTimerSub", "Delay phase" + (target ? ' (calc: ' + hcName + ' ' + timerSP(hcName, 1800) + ' − ' + runName + ' run ' + (typeof runVal === "number" ? runVal : 0) + ' = <b class="timer-sp">' + target.sp + '</b> s)' : ""));
       } else if (t.Step === 106) {
         var sp11 = timerSP("T_11", 900);
         setHtml("vStepTimerSub", "P1 pumping" + (typeof t.t_11 === "number" ? ' · t_11: <span class="timer-run">' + t.t_11 + '</span> / <b class="timer-sp">' + sp11 + '</b> s' : ""));
