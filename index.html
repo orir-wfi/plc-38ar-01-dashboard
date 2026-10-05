@@ -3,6 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="color-scheme" content="only light">
 <title>SS2 PLC Web HMI</title>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
@@ -15,7 +16,7 @@
      panels. Colour carries meaning only: red = alarm/fault, amber = warning,
      magenta = simulation, teal = navigation/submit. No green, nothing blinks. */
   :root{
-    color-scheme: light;
+    color-scheme: only light; /* stops phone browsers force-darkening the page */
     --bg:#e3e5e6; --surface:#f6f7f7; --surface-2:#eceeee; --border:#c8cccd;
     --ink:#1c2326; --ink-2:#4a5357; --ink-3:#6f787c;
     --equip:#4a5357; --level:#9fb4b8;
