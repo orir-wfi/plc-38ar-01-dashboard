@@ -61,6 +61,12 @@
   .alarm-btn.alert-btn.active{ border:2px solid var(--warning); color:var(--warning); background:rgba(217,119,6,0.12); }
   .timer-sp{ font-weight:700; color:var(--ink); }
   .timer-run{ font-weight:400; color:var(--ink-2); }
+  /* Live-data loss (orir 2026-10-05): a frozen page must not look normal.
+     Large warning bar like the simulation strip + every page's values faded
+     and greyed. Steady, never blinking (ISA-101). */
+  .stale-strip{ display:block; width:100%; font:inherit; font-size:16px; font-weight:700; background:#fbf1e1; color:#6b4410; border:0; border-bottom:3px solid var(--warning); padding:10px 16px; }
+  .stale-strip small{ display:block; font-size:12.5px; font-weight:500; margin-top:2px; }
+  body.data-stale .page:not(#signin){ opacity:.42; filter:grayscale(1); transition:opacity .3s, filter .3s; }
   .lastseen{ font-size:11.5px; color:var(--ink-3); padding:4px 16px 0; max-width:1100px; margin:0 auto; }
   .sim-strip{ display:block; width:100%; text-align:left; font:inherit; font-size:13px; font-weight:700; background:var(--sim-tint); color:var(--sim-ink); border:0; border-bottom:2px solid var(--sim); padding:6px 16px; cursor:pointer; }
 
@@ -241,6 +247,7 @@
   </div>
 </header>
 <button type="button" class="sim-strip" id="simStrip" hidden></button>
+<div class="stale-strip" id="staleStrip" role="alert" hidden></div>
 </div>
 <div class="lastseen mono" id="lastSeen">No telemetry received yet</div>
 
@@ -679,7 +686,6 @@
   // survives one lost heartbeat.
   var TOPIC_WATCH = "plc/" + DEVICE_ID + "/watch";
   var WATCH_EVERY_MS = 30000;
-  var STALE_MS = 90000;
   var STORE_KEY = "plchmi.plc-38ar-01.login";
   var PAGES = ["overview", "trends", "setpoints", "alarms", "system"];
 
@@ -706,7 +712,25 @@
 
   function setStatus(kind, text){ els.statusPill.className = "pill " + kind; els.statusText.textContent = text; }
 
+  function renderLiveData(){
+    var st = HmiLogic.liveDataState({ lastSeenAt: lastSeenAt, watchSentAt: watchSentAt, now: Date.now(),
+                                      connected: !!(client && client.connected),
+                                      // ?demo has no broker: banner only with &stale (design review)
+                                      paused: paused || (window.__hmiDemo && !/[?&]stale\b/.test(location.search)) });
+    document.body.classList.toggle("data-stale", st.stale);
+    var strip = $("staleStrip");
+    strip.hidden = !st.stale;
+    if (!st.stale) return;
+    var at = new Date(lastSeenAt), secs = Math.round((Date.now() - lastSeenAt) / 1000);
+    var hhmmss = ("0" + at.getHours()).slice(-2) + ":" + ("0" + at.getMinutes()).slice(-2) + ":" + ("0" + at.getSeconds()).slice(-2);
+    strip.innerHTML = "NO LIVE DATA — values shown are frozen since " + hhmmss + " (" + secs + " s ago)" +
+      "<small>" + (st.reason === "connection" ? "Connection to the cloud broker lost - reconnecting." :
+                                                "The PLC is not sending telemetry - it may be offline.") +
+      " Do not rely on this page until the bar disappears.</small>";
+  }
+
   function checkFreshness(){
+    renderLiveData();
     if(client && client.connected && HmiLogic.plcNotAnswering(watchSentAt, lastSeenAt, Date.now())){
       setStatus("stale", "PLC not answering");
     }
@@ -714,7 +738,7 @@
     var secs = Math.round((Date.now() - lastSeenAt) / 1000);
     els.lastSeen.textContent = "Last telemetry " + secs + " s ago";
     if(!client || !client.connected) return;
-    var stale = secs * 1000 > STALE_MS;
+    var stale = secs * 1000 >= HmiLogic.LIVE_STALE_MS;
     setStatus(stale ? "stale" : "live", stale ? "Telemetry stale" : "Live");
   }
 
@@ -954,6 +978,7 @@
     client.on("reconnect", function(){ setStatus("stale", "Reconnecting…"); });
     client.on("close", function(){
       stopWatch();
+      renderLiveData();
       if(els.statusText.textContent !== "Not connected" && !paused) setStatus("down", "Disconnected");
     });
     client.on("error", function(err){

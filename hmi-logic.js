@@ -564,6 +564,19 @@
     return now - watchSentAt >= 10000;
   }
 
+  // Live-data quality for the stale banner + faded values (orir 2026-10-05:
+  // a frozen page looked "fine"). Telemetry comes every 5 s while watched;
+  // 20 s = four missed frames. Nothing to warn about before the first frame
+  // or while the page is deliberately paused (its own dialog says so).
+  var LIVE_STALE_MS = 20000;
+  function liveDataState(o) {
+    if (o.paused || o.lastSeenAt == null) return { stale: false, reason: null };
+    if (!o.connected) return { stale: true, reason: 'connection' };
+    if (o.now - o.lastSeenAt >= LIVE_STALE_MS) return { stale: true, reason: 'plc' };
+    if (plcNotAnswering(o.watchSentAt, o.lastSeenAt, o.now)) return { stale: true, reason: 'plc' };
+    return { stale: false, reason: null };
+  }
+
   // A browser that saved its login before the broker move still points at
   // HiveMQ Cloud (retired 2026-12-31) - repoint it, keep any other host.
   function migrateSavedLogin(saved, host, port) {
@@ -823,7 +836,7 @@
     createRing, sparklinePath, DEMO_FRAMES, describeBoot, sdCardStatus,
     historyWindow, historyWindowAt, historyStepSeconds, createHistoryAssembler, historyColumns,
     historyAppendLive, telemetryToHistoryRow, historyEventText, historyErrorText, historyNeedsReload, historyStillBusy, stepShade, demoHistoryChunks,
-    HIDDEN_PAUSE_MS, IDLE_PAUSE_MS, hmiPauseReason, plcNotAnswering, migrateSavedLogin,
+    HIDDEN_PAUSE_MS, IDLE_PAUSE_MS, hmiPauseReason, plcNotAnswering, LIVE_STALE_MS, liveDataState, migrateSavedLogin,
     emailRequestWrites, emailResetWrites, dailyEmailResultText,
     CAL_INSTRUMENTS, PROCESS_SETPOINTS, averageLast, currentValueFromMilliamps, zeroAdjust, twoPointRange, validateRange, validateRawCapture, validateElectrical, calibrationConfirmText,
     currentValueForSetpoint,
