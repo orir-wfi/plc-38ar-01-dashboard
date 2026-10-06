@@ -491,8 +491,7 @@
         <div class="kv"><div class="k">NO3</div><div class="v mono html-sim" data-sim-point="AIT01_NO3" id="vNo3">—</div><div class="sub" id="vNo3Avg"></div>
           <svg class="spark" viewBox="0 0 200 26" preserveAspectRatio="none"><path id="sparkNo3"/></svg></div>
         <div class="kv"><div class="k">Dosing</div><div class="v mono" id="vDosing">—</div></div>
-        <div class="kv"><div class="k">Inlet total (FT101)</div><div class="v mono" id="vInletTotal">—</div><div class="sub" id="vInletTotalSub"></div></div>
-        <div class="kv"><div class="k">Dosing total (DP1)</div><div class="v mono" id="vDp1Total">—</div></div>
+        <div class="kv"><div class="k">Inlet total (FT101)</div><div class="v mono" id="vInletTotal">—</div></div>
         <div class="kv"><div class="k">Main switch</div><div class="v mono html-sim" data-sim-point="System_Switch" id="vMainSwitch">—</div></div>
         <div class="kv"><div class="k">Step timer (t_16)</div><div class="v mono" id="vStepTimer">—</div><div class="sub" id="vStepTimerSub"></div></div>
         <div class="kv"><div class="k">Half-cycle timer</div><div class="v mono" id="vCycleTimer">—</div><div class="sub" id="vCycleTimerSub"></div></div>
@@ -1124,11 +1123,7 @@
       setText("vFlow", flowLh + " L/h"); setText("mimicFlow", flowLh);
       rings.FLOW.push(t.FT101_Flow_Lh); drawSpark("sparkFlow", rings.FLOW);
     }
-    if (typeof t.Inlet_Total_L === "number") {
-      setText("vInletTotal", (t.Inlet_Total_L / 1000).toFixed(1) + " m³");
-      setText("vInletTotalSub", t.Inlet_Total_L + " L");
-    }
-    if (typeof t.DP1_Total_Strokes === "number") setText("vDp1Total", t.DP1_Total_Strokes + " strokes");
+    if (typeof t.Inlet_Total_L === "number") setText("vInletTotal", (t.Inlet_Total_L / 1000).toFixed(3) + " m³");
     setText("vStep", HmiLogic.stepLabel(t.Step, t.Cycle_Type === 1));
     setText("vStepName", typeof t.Step === "number" ? HmiLogic.stepDescription(t.Step) : "");
     var dosing = HmiLogic.dosingText(t, typeof coils.B14 === "number" ? coils.B14 === 1 : undefined);
@@ -1249,8 +1244,8 @@
     levelFullScaleCm = 160;
     rings = newRings();
     ["mimicLT01Value", "mimicLT02Value", "vLt01", "vLt02", "vNo3", "mimicNo3", "vFlow", "mimicFlow", "vStep",
-     "vDosing", "mimicDosing", "mimicLS0Label", "vCycles", "vInletTotal", "vDp1Total", "vStepTimer", "vCycleTimer", "stepTimerBadgeText"].forEach(function(id){ setText(id, "—"); });
-    ["vNo3Avg", "vInletTotalSub", "vStepName", "vCyclesSub", "vStepTimerSub", "vCycleTimerSub"].forEach(function(id){ setText(id, ""); });
+     "vDosing", "mimicDosing", "mimicLS0Label", "vCycles", "vInletTotal", "vStepTimer", "vCycleTimer", "stepTimerBadgeText"].forEach(function(id){ setText(id, "—"); });
+    ["vNo3Avg", "vStepName", "vCyclesSub", "vStepTimerSub", "vCycleTimerSub"].forEach(function(id){ setText(id, ""); });
     setBar("mimicLT01Bar", 0); setBar("mimicLT02Bar", 0);
     ["sparkFlow", "sparkNo3", "sparkLt01", "sparkLt02"].forEach(function(id){ $(id).setAttribute("d", ""); });
     $("mimicLS0").classList.remove("fault");
