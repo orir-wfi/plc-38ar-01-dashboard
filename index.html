@@ -98,6 +98,11 @@
   .kv .k{ font-size:11.5px; color:var(--ink-3); }
   .kv .v{ font-size:18px; font-weight:600; display:inline-block; }
   .kv .sub{ font-size:12px; color:var(--ink-2); }
+  .inlet-set-btn{ margin-left:8px; padding:3px 10px !important; vertical-align:middle; }
+  .inlet-set{ display:flex; flex-wrap:wrap; align-items:center; gap:6px; margin-top:6px; }
+  .inlet-set[hidden]{ display:none; }
+  .inlet-set-break{ flex-basis:100%; height:0; }
+  .inlet-set input{ flex:0 1 110px; min-width:0; background:var(--surface-2); border:1px solid var(--border); box-shadow:inset 0 1px 2px rgba(0,0,0,.08); border-radius:6px; padding:6px 8px; font-family:"IBM Plex Mono",monospace; font-size:13px; color:var(--ink); }
   svg.spark{ width:100%; height:26px; display:block; }
   svg.spark path{ fill:none; stroke:var(--ink-3); stroke-width:1.5; vector-effect:non-scaling-stroke; }
   /* Equipment symbols read these custom properties through <use>. */
@@ -491,7 +496,16 @@
         <div class="kv"><div class="k">NO3</div><div class="v mono html-sim" data-sim-point="AIT01_NO3" id="vNo3">—</div><div class="sub" id="vNo3Avg"></div>
           <svg class="spark" viewBox="0 0 200 26" preserveAspectRatio="none"><path id="sparkNo3"/></svg></div>
         <div class="kv"><div class="k">Dosing</div><div class="v mono" id="vDosing">—</div></div>
-        <div class="kv"><div class="k">Inlet total (FT101)</div><div class="v mono" id="vInletTotal">—</div></div>
+        <div class="kv"><div class="k">Inlet total (FT101)</div><div class="v mono" id="vInletTotal">—</div>
+          <button type="button" class="secondary inlet-set-btn" id="inletSetBtn" hidden>Set…</button>
+          <div class="inlet-set" id="inletSetRow" hidden>
+            <input type="number" id="inletSetInput" min="0" max="99999.999" step="0.001" inputmode="decimal" aria-label="New inlet total in cubic metres">
+            <span class="small">m³</span>
+            <span class="inlet-set-break"></span>
+            <button type="button" class="secondary" id="inletSetApply">Apply</button>
+            <button type="button" class="secondary" id="inletSetCancel">Cancel</button>
+          </div>
+          <div class="sub" id="inletSetResult"></div></div>
         <div class="kv"><div class="k">Main switch</div><div class="v mono html-sim" data-sim-point="System_Switch" id="vMainSwitch">—</div></div>
         <div class="kv"><div class="k">Step timer (t_16)</div><div class="v mono" id="vStepTimer">—</div><div class="sub" id="vStepTimerSub"></div></div>
         <div class="kv"><div class="k">Half-cycle timer</div><div class="v mono" id="vCycleTimer">—</div><div class="sub" id="vCycleTimerSub"></div></div>
@@ -1082,6 +1096,31 @@
     $(id).setAttribute("y", 278 - h);
     $(id).setAttribute("height", h);
   }
+  // Inlet totalizer set (2026-10-06): match the PLC's total to FT101's
+  // local display. The PLC applies it as an offset; cycle records are unaffected.
+  var lastInletTotalL = null;
+  function closeInletSet(){ $("inletSetRow").hidden = true; $("inletSetBtn").hidden = false; }
+  $("inletSetBtn").addEventListener("click", function(){
+    $("inletSetInput").value = lastInletTotalL === null ? "" : (lastInletTotalL / 1000).toFixed(3);
+    $("inletSetResult").textContent = "";
+    $("inletSetBtn").hidden = true; $("inletSetRow").hidden = false; $("inletSetInput").focus();
+  });
+  $("inletSetCancel").addEventListener("click", closeInletSet);
+  $("inletSetApply").addEventListener("click", function(){
+    var m3 = parseFloat($("inletSetInput").value);
+    if (!isFinite(m3) || m3 < 0 || m3 > 99999.999) { $("inletSetResult").textContent = "Enter 0 – 99999.999 m³."; return; }
+    var litres = Math.round(m3 * 1000);
+    var cur = lastInletTotalL === null ? "—" : (lastInletTotalL / 1000).toFixed(3);
+    window.hmiConfirm("Set inlet total from " + cur + " m³ to " + (litres / 1000).toFixed(3) + " m³?", "Set total").then(function(ok){
+      if (!ok) return;
+      $("inletSetResult").textContent = "Sending…";
+      window.sendDashCommand("set_inlet_total", { litres: litres }, function(resp){
+        $("inletSetResult").textContent = resp.ok ? "Set to " + (resp.litres / 1000).toFixed(3) + " m³." : ("Failed: " + resp.error);
+        if (resp.ok) closeInletSet();
+      });
+    });
+  });
+
   function drawSpark(pathId, ring){ $(pathId).setAttribute("d", HmiLogic.sparklinePath(ring.values(), 200, 26)); }
 
   // Lines that go dark while their pump runs. The feed branches stay dashed:
@@ -1124,6 +1163,9 @@
       rings.FLOW.push(t.FT101_Flow_Lh); drawSpark("sparkFlow", rings.FLOW);
     }
     if (typeof t.Inlet_Total_L === "number") setText("vInletTotal", (t.Inlet_Total_L / 1000).toFixed(3) + " m³");
+    lastInletTotalL = typeof t.Inlet_Total_L === "number" ? t.Inlet_Total_L : null;
+    // Inlet_Ofs_L is only sent by firmware that accepts set_inlet_total (v62+).
+    $("inletSetBtn").hidden = !(window.hmiIsOperator() && typeof t.Inlet_Ofs_L === "number") || !$("inletSetRow").hidden;
     setText("vStep", HmiLogic.stepLabel(t.Step, t.Cycle_Type === 1));
     setText("vStepName", typeof t.Step === "number" ? HmiLogic.stepDescription(t.Step) : "");
     var dosing = HmiLogic.dosingText(t, typeof coils.B14 === "number" ? coils.B14 === 1 : undefined);
@@ -1136,7 +1178,8 @@
     }
     if (typeof t.C_10 === "number") {
       setText("vCycles", String(t.C_10));
-      setText("vCyclesSub", "Large " + t.C_11 + " · Small " + t.C_12);
+      var run = HmiLogic.cycleRunText(t);
+      setText("vCyclesSub", "Large " + t.C_11 + " · Small " + t.C_12 + (run ? " · " + run.charAt(0).toLowerCase() + run.slice(1) : ""));
     }
 
     function timerSP(name, fallback){
@@ -1245,10 +1288,11 @@
     rings = newRings();
     ["mimicLT01Value", "mimicLT02Value", "vLt01", "vLt02", "vNo3", "mimicNo3", "vFlow", "mimicFlow", "vStep",
      "vDosing", "mimicDosing", "mimicLS0Label", "vCycles", "vInletTotal", "vStepTimer", "vCycleTimer", "stepTimerBadgeText"].forEach(function(id){ setText(id, "—"); });
-    ["vNo3Avg", "vStepName", "vCyclesSub", "vStepTimerSub", "vCycleTimerSub"].forEach(function(id){ setText(id, ""); });
+    ["vNo3Avg", "inletSetResult", "vStepName", "vCyclesSub", "vStepTimerSub", "vCycleTimerSub"].forEach(function(id){ setText(id, ""); });
     setBar("mimicLT01Bar", 0); setBar("mimicLT02Bar", 0);
     ["sparkFlow", "sparkNo3", "sparkLt01", "sparkLt02"].forEach(function(id){ $(id).setAttribute("d", ""); });
     $("mimicLS0").classList.remove("fault");
+    lastInletTotalL = null; $("inletSetRow").hidden = true; $("inletSetBtn").hidden = true;
     renderPumps({});
   }
 
@@ -1463,7 +1507,7 @@
 
   var groups = {};
   HmiLogic.PROCESS_SETPOINTS.forEach(function(sp){ (groups[sp.group] = groups[sp.group] || []).push(sp); });
-  var groupOrder = ["Timers", "Levels", "NO3", "Dosing"];
+  var groupOrder = ["Timers", "Cycles", "Levels", "NO3", "Dosing"];
   Object.keys(groups).forEach(function(g){ if (groupOrder.indexOf(g) === -1) groupOrder.push(g); });
   groupOrder.forEach(function(groupName){
     if (!groups[groupName]) return;
