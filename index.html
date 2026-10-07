@@ -2599,7 +2599,7 @@
         if (HmiLogic.isNewBoot(bootBefore, window.__hmiLastBoot)) onBoot({ detail: window.__hmiLastBoot });
         giveUp = setTimeout(function(){
           document.removeEventListener("hmi:boot", onBoot);
-          resultEl.textContent = "PLC not back after 3 min - check "Last restart" on this page";
+          resultEl.textContent = "PLC not back after 3 min - check 'Last restart' on this page";
         }, 180000);
       });
     });
