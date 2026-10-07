@@ -2676,20 +2676,30 @@
     var writes = HmiLogic.emailRequestWrites(document.getElementById("emailReqDate").value);
     if (!writes) { resultEl.textContent = "Pick a valid day"; return; }
     resultEl.textContent = "Sending...";
+    // v66: with a fragmented heap the PLC pauses MQTT for the send (a few
+    // minutes), so the result can come late and the trigger's own reply can
+    // time out even though the PLC took it.
+    function waitForResult(text){
+      resultEl.textContent = text;
+      clearTimeout(emailWait);
+      emailWait = setTimeout(function(){ emailWait = null; resultEl.textContent = "Triggered (no result reported within 10 min) - check the inbox"; }, 600000);
+    }
     sendDashBatchWrite(writes, function(resp){
+      if (resp && resp.error === "timeout") {
+        waitForResult("No reply yet - the PLC may already be sending with its remote link paused; waiting for the result (up to 10 min)...");
+        return;
+      }
       var out = HmiLogic.batchOutcome(resp);
       if (!out.applied) { resultEl.textContent = "Failed: " + (out.error || out.failed.map(function(f){ return f.point; }).join(", ")); return; }
       sendDashBatchWrite(HmiLogic.emailResetWrites(), function(){}); // back to "yesterday" for the next send
-      resultEl.textContent = "Triggered, waiting for the PLC's result...";
-      clearTimeout(emailWait);
-      emailWait = setTimeout(function(){ emailWait = null; resultEl.textContent = "Triggered (no result reported within 2 min)"; }, 120000);
+      waitForResult("Triggered, waiting for the PLC's result...");
     });
   });
   document.addEventListener("hmi:debug", function(e){
-    var text = HmiLogic.dailyEmailResultText(e.detail);
-    if (!text || emailWait === null) return;
-    clearTimeout(emailWait); emailWait = null;
-    document.getElementById("sendDailyEmailResult").textContent = text;
+    var st = HmiLogic.dailyEmailStatus(e.detail);
+    if (!st || emailWait === null) return;
+    document.getElementById("sendDailyEmailResult").textContent = st.text;
+    if (st.final) { clearTimeout(emailWait); emailWait = null; }
   });
 })();
 </script>

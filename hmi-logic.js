@@ -651,11 +651,29 @@
   // not set" bail-out), so a real line looks like
   // "[1790000000] daily_email: ...". Strip that timestamp before checking
   // the prefix; bare (no-timestamp) lines still work too.
+  // v66 holds debug lines written while MQTT is paused for an email and
+  // publishes them joined with " | " - the daily_email part can be anywhere.
   function dailyEmailResultText(line) {
     if (typeof line !== 'string') return null;
-    const rest = line.replace(/^\[\d+\]\s*/, '');
     const p = 'daily_email:';
-    return rest.indexOf(p) === 0 ? rest.slice(p.length).trim() : null;
+    const parts = line.replace(/^\[\d+\]\s*/, '').split(' | ').filter(s => s.indexOf(p) === 0);
+    return parts.length ? parts[parts.length - 1].slice(p.length).trim() : null;
+  }
+
+  const EMAIL_PAUSED_TEXT = 'Sending - the PLC paused its remote link to free memory; result in a few minutes';
+
+  // {text, final} for the Send-now result line, or null if the debug line is
+  // not about the daily email. final=false: keep waiting for the outcome.
+  function dailyEmailStatus(line) {
+    const r = dailyEmailResultText(line);
+    if (r !== null) {
+      const m = r.match(/^heap too fragmented - (retry .*)$/);
+      return m ? { text: 'PLC memory too fragmented - ' + m[1], final: false } : { text: r, final: true };
+    }
+    if (typeof line === 'string' && line.indexOf('MQTT paused') >= 0 && line.indexOf('email:') >= 0) {
+      return { text: EMAIL_PAUSED_TEXT, final: false };
+    }
+    return null;
   }
 
   // ---- Instrument calibration (spec 2026-09-27-analog-calibration-design) ----
@@ -848,7 +866,7 @@
     historyWindow, historyWindowAt, historyStepSeconds, createHistoryAssembler, historyColumns,
     historyAppendLive, telemetryToHistoryRow, historyEventText, historyErrorText, historyNeedsReload, historyStillBusy, stepShade, demoHistoryChunks,
     HIDDEN_PAUSE_MS, IDLE_PAUSE_MS, hmiPauseReason, plcNotAnswering, LIVE_STALE_MS, liveDataState, migrateSavedLogin,
-    emailRequestWrites, emailResetWrites, dailyEmailResultText,
+    emailRequestWrites, emailResetWrites, dailyEmailResultText, dailyEmailStatus, EMAIL_PAUSED_TEXT,
     CAL_INSTRUMENTS, PROCESS_SETPOINTS, cycleRunText, averageLast, currentValueFromMilliamps, zeroAdjust, twoPointRange, validateRange, validateRawCapture, validateElectrical, calibrationConfirmText,
     currentValueForSetpoint,
   };
