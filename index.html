@@ -406,6 +406,10 @@
           <text class="mimic-note" x="622" y="356" style="text-anchor:end">Effluent</text>
           <text class="mimic-note" x="700" y="370">Influent</text>
 
+          <!-- LTCR transfer rate of the running P1/P2 (drain of the pumped tank / fill of the other) -->
+          <text class="mimic-note" id="mimicXferP1" x="360" y="240"></text>
+          <text class="mimic-note" id="mimicXferP2" x="282" y="288"></text>
+
           <!-- T-1 TAYA 1 (left) -->
           <rect class="tank" x="60" y="80" width="120" height="200" rx="4"/>
           <rect class="level" id="mimicLT01Bar" x="62" y="278" width="116" height="0"/>
@@ -513,6 +517,7 @@
           <svg class="spark" viewBox="0 0 200 26" preserveAspectRatio="none"><path id="sparkLt01"/></svg></div>
         <div class="kv desk-only"><div class="k">TAYA 2 level</div><div class="v mono html-sim" data-sim-point="LT02" id="vLt02">—</div>
           <svg class="spark" viewBox="0 0 200 26" preserveAspectRatio="none"><path id="sparkLt02"/></svg></div>
+        <div class="kv"><div class="k">Transfer rate (LTCR)</div><div class="v mono" id="vXfer">—</div><div class="sub" id="vXferSub"></div></div>
         <div class="kv desk-only"><div class="k">Cycles today</div><div class="v mono" id="vCycles">—</div><div class="sub" id="vCyclesSub"></div></div>
       </div>
     </section>
@@ -1162,6 +1167,11 @@
       setText("vFlow", flowLh + " L/h"); setText("mimicFlow", flowLh);
       rings.FLOW.push(t.FT101_Flow_Lh); drawSpark("sparkFlow", rings.FLOW);
     }
+    var xfer = HmiLogic.transferRate(t, coils);
+    setText("mimicXferP1", xfer && xfer.pump === "P1" ? xfer.text : "");
+    setText("mimicXferP2", xfer && xfer.pump === "P2" ? xfer.text : "");
+    setText("vXfer", xfer ? xfer.text : "—");
+    setText("vXferSub", xfer ? xfer.pump + " · drain / fill" : "");
     if (typeof t.Inlet_Total_L === "number") setText("vInletTotal", (t.Inlet_Total_L / 1000).toFixed(3) + " m³");
     lastInletTotalL = typeof t.Inlet_Total_L === "number" ? t.Inlet_Total_L : null;
     // Inlet_Ofs_L is only sent by firmware that accepts set_inlet_total (v62+).
@@ -1287,8 +1297,8 @@
     levelFullScaleCm = 160;
     rings = newRings();
     ["mimicLT01Value", "mimicLT02Value", "vLt01", "vLt02", "vNo3", "mimicNo3", "vFlow", "mimicFlow", "vStep",
-     "vDosing", "mimicDosing", "mimicLS0Label", "vCycles", "vInletTotal", "vStepTimer", "vCycleTimer", "stepTimerBadgeText"].forEach(function(id){ setText(id, "—"); });
-    ["vNo3Avg", "inletSetResult", "vStepName", "vCyclesSub", "vStepTimerSub", "vCycleTimerSub"].forEach(function(id){ setText(id, ""); });
+     "vDosing", "mimicDosing", "mimicLS0Label", "vCycles", "vInletTotal", "vStepTimer", "vCycleTimer", "stepTimerBadgeText", "vXfer"].forEach(function(id){ setText(id, "—"); });
+    ["vNo3Avg", "mimicXferP1", "mimicXferP2", "vXferSub", "inletSetResult", "vStepName", "vCyclesSub", "vStepTimerSub", "vCycleTimerSub"].forEach(function(id){ setText(id, ""); });
     setBar("mimicLT01Bar", 0); setBar("mimicLT02Bar", 0);
     ["sparkFlow", "sparkNo3", "sparkLt01", "sparkLt02"].forEach(function(id){ $(id).setAttribute("d", ""); });
     $("mimicLS0").classList.remove("fault");

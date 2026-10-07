@@ -31,6 +31,8 @@
     { id: 23, title: 'Average_level_High', zone: 'TAYA 1&2', type: 'Alert', reset: 'Auto' },
     { id: 24, title: 'Half_cycle_timer_SP_too_small', zone: 'TAYA 1&2', type: 'Alert', reset: 'Manual' },
     { id: 25, title: 'Emergency_Stop', zone: 'General', type: 'Fault', reset: 'Manual' },
+    { id: 26, title: 'LTCR_P1 (transfer rate too low)', zone: 'TAYA 1', type: 'Fault', reset: 'Manual' },
+    { id: 27, title: 'LTCR_P2 (transfer rate too low)', zone: 'TAYA 2', type: 'Fault', reset: 'Manual' },
   ];
 
   // FaultBitmask (telemetry): bit N set iff fault-list.md id N is
@@ -60,6 +62,7 @@
     { name: 'SP_L4', group: 'Levels', label: 'Minimum Level Pump Protection', unit: 'cm', min: 0, max: 400 },
     { name: 'SP_L5', group: 'Levels', label: 'Average level Low', unit: 'cm', min: 0, max: 400 },
     { name: 'SP_L6', group: 'Levels', label: 'Average level High', unit: 'cm', min: 0, max: 400 },
+    { name: 'SP_L7', group: 'Levels', label: 'LTCR min transfer rate (0 = off)', unit: 'cm/min', min: 0, max: 50 },
     { name: 'SP_N1', group: 'NO3', label: 'Low nitrate Alert', unit: 'ppm', min: 0, max: 1000 },
     { name: 'SP_N2', group: 'NO3', label: 'High nitrate Alert', unit: 'ppm', min: 0, max: 1000 },
     { name: 'SP_N3', group: 'NO3', label: 'Desired NO3 Concentration', unit: 'ppm', min: 0, max: 1000 },
@@ -76,6 +79,7 @@
     { name: 'T_14', group: 'Timers', label: 'Timer Half cycle small', unit: 'sec', min: 0, max: 86400 },
     { name: 'T_15', group: 'Timers', label: 'Time to change SP_F02', unit: 'min', min: 0, max: 65535 },
     { name: 'T_16', group: 'Timers', label: 'Step Timer', unit: 'sec', min: 0, max: 86400 },
+    { name: 'T_17', group: 'Timers', label: 'LTCR rate window', unit: 'sec', min: 10, max: 3600 },
     { name: 'SP_C1', group: 'Cycles', label: 'Large cycles in a row (0 = none)', unit: 'cycles', min: 0, max: 99 },
     { name: 'SP_C2', group: 'Cycles', label: 'Small cycles in a row (0 = none)', unit: 'cycles', min: 0, max: 99 },
     { name: 'SP_L1_4mA', group: 'Calibration', label: 'LT01 raw ADC at 4mA', unit: 'counts', min: 0, max: 4095 },
@@ -220,8 +224,9 @@
     return { changes, errors };
   }
 
-  // Fault-list ids of the pump overload faults (fault-list.md).
-  const PUMP_FAULT_ID = { P1: 1, P2: 2, P3: 3, P4: 4 };
+  // Fault-list ids that mark a pump faulted (fault-list.md): own overload,
+  // plus LTCR (#26/#27, transfer rate too low) for P1/P2.
+  const PUMP_FAULT_IDS = { P1: [1, 26], P2: [2, 27], P3: [3], P4: [4] };
   function pumpRunningFromStep(pump, t) {
     const s = t.Step;
     if (typeof s !== 'number') return false;
@@ -247,8 +252,20 @@
     const manual = typeof mode === 'number' ? mode === 1 : null;
     let fault = false;
     if (pump === 'DP1') fault = t.DP1_Fault === 1;
-    else if (typeof t.FaultBitmask === 'number') fault = ((t.FaultBitmask >>> PUMP_FAULT_ID[pump]) & 1) === 1;
+    else if (typeof t.FaultBitmask === 'number') fault = PUMP_FAULT_IDS[pump].some((id) => ((t.FaultBitmask >>> id) & 1) === 1);
     return { running, manual, fault };
+  }
+
+  // LTCR transfer rate (firmware v67): LTCR_Drain/LTCR_Fill cm/min of the
+  // running P1/P2 over the last T_17 window, null before the 2nd window.
+  // Returns { pump, drain, fill, text } or null when there is nothing to show.
+  function transferRate(t, coils) {
+    t = t || {};
+    if (typeof t.LTCR_Drain !== 'number' || typeof t.LTCR_Fill !== 'number') return null;
+    const pump = pumpState('P1', t, coils).running ? 'P1' : pumpState('P2', t, coils).running ? 'P2' : null;
+    if (!pump) return null;
+    return { pump, drain: t.LTCR_Drain, fill: t.LTCR_Fill,
+             text: '↓' + t.LTCR_Drain.toFixed(1) + ' ↑' + t.LTCR_Fill.toFixed(1) + ' cm/min' };
   }
 
   // b14Auto: true/false from the B14 coil read, undefined if unknown.
@@ -330,7 +347,7 @@
     FT101_accumulated: 182, ActiveFaultCount: 0, FaultBitmask: 0, HMI_Run: 1, TAYA_Fault: 0,
     Inlet_Fault: 0, Sugar_Fault: 0, DP1_Fault: 0, P3_Fault: 0, Force_B14_Manual: 0,
     Emergency_Stop: 0, C_10: 7, C_11: 4, C_12: 3, C_13: 2.1, C_14: 1.9,
-    Step: 106, Cycle_Type: 1, FT101_Flow_Lh: 1820, Dosing_Flow: 350, NO3_Inlet_Avg: 418,
+    Step: 106, Cycle_Type: 1, LTCR_Drain: 5.3, LTCR_Fill: 5.1, FT101_Flow_Lh: 1820, Dosing_Flow: 350, NO3_Inlet_Avg: 418,
     Inlet_Total_L: 125400, Inlet_Ofs_L: 0, Cycle_Run: 1, DP1_Total_Strokes: 88210, Sim_Mask: 0, SD_OK: 1,
     ActiveTransport: 1, WiFi_Connected: 1, WiFi_RSSI: -61, Loop_Max_ms: 24,
     LT01_ADC: 1464, LT01_mA: 16.64, LT02_ADC: 1256, LT02_mA: 14.56, AIT01_NO3_ADC: 537, AIT01_NO3_mA: 7.37,
@@ -845,6 +862,10 @@
       case 'T_15':
         if (typeof t.t_15 === 'number') return t.t_15 + ' min';
         return '0 min';
+      case 'SP_L7':
+        if (typeof t.LTCR_Drain === 'number' && typeof t.LTCR_Fill === 'number')
+          return Math.max(t.LTCR_Drain, t.LTCR_Fill).toFixed(1) + ' cm/min';
+        return '—';
       case 'SP_C1':
       case 'SP_C2':
         return cycleRunText(t) || '—';
@@ -861,7 +882,7 @@
     packEmailToRegisters, unpackRegistersToEmail,
     STEP_NAMES, stepName, stepLabel, stepDescription,
     SIM_POINTS, simPointsFromMask, simEnableWrites, realValue, simValueText, simConfirmMessage,
-    validateNumber, setpointDiff, pumpState, dosingText, batchOutcome, alarmSummary, mainSwitchStatus,
+    validateNumber, setpointDiff, pumpState, transferRate, dosingText, batchOutcome, alarmSummary, mainSwitchStatus,
     createRing, sparklinePath, DEMO_FRAMES, describeBoot, sdCardStatus,
     historyWindow, historyWindowAt, historyStepSeconds, createHistoryAssembler, historyColumns,
     historyAppendLive, telemetryToHistoryRow, historyEventText, historyErrorText, historyNeedsReload, historyStillBusy, stepShade, demoHistoryChunks,
