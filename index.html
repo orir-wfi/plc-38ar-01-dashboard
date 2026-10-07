@@ -2583,8 +2583,24 @@
       if (!ok) return;
       var resultEl = document.getElementById("rebootResult");
       resultEl.textContent = "Sending…";
+      var bootBefore = window.__hmiLastBoot || null;
       sendDashCommand("coil", { point: "System_Reboot", value: 1 }, function(resp){
-        resultEl.textContent = resp.ok ? "Reboot triggered" : ("Failed: " + resp.error);
+        var r = HmiLogic.rebootReplyText(resp);
+        resultEl.textContent = r.text;
+        if (!r.wait) return;
+        var giveUp;
+        function onBoot(e){
+          if (!HmiLogic.isNewBoot(bootBefore, e.detail)) return;
+          document.removeEventListener("hmi:boot", onBoot);
+          clearTimeout(giveUp);
+          resultEl.textContent = "Rebooted OK " + new Date().toLocaleTimeString() + " (" + (e.detail.build || "?") + ")";
+        }
+        document.addEventListener("hmi:boot", onBoot);
+        if (HmiLogic.isNewBoot(bootBefore, window.__hmiLastBoot)) onBoot({ detail: window.__hmiLastBoot });
+        giveUp = setTimeout(function(){
+          document.removeEventListener("hmi:boot", onBoot);
+          resultEl.textContent = "PLC not back after 3 min - check "Last restart" on this page";
+        }, 180000);
       });
     });
   });

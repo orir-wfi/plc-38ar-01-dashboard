@@ -375,6 +375,18 @@
   };
   const BOOT_ABNORMAL = { crash: true, watchdog: true, brownout: true };
   const TRANSPORT_NAMES = { 0: 'None', 1: 'Ethernet', 2: 'WiFi', 3: 'LTE' };
+  // System_Reboot: the PLC restarts before its reply reaches the broker, so a
+  // timeout is the normal outcome; the new boot report is the confirmation.
+  function rebootReplyText(resp) {
+    if (resp && resp.ok) return { text: 'Reboot triggered - waiting for the PLC to come back...', wait: true };
+    if (resp && resp.error === 'timeout') return { text: 'Rebooting (no reply is normal) - waiting for the PLC to come back...', wait: true };
+    return { text: 'Failed: ' + (resp && resp.error), wait: false };
+  }
+  function isNewBoot(before, after) {
+    if (!after) return false;
+    if (!before) return true;
+    return before.t !== after.t || before.uptime_ms !== after.uptime_ms || before.build !== after.build;
+  }
   function describeBoot(boot) {
     if (!boot) return null;
     const reset = boot.reset || 'unknown';
@@ -883,7 +895,7 @@
     STEP_NAMES, stepName, stepLabel, stepDescription,
     SIM_POINTS, simPointsFromMask, simEnableWrites, realValue, simValueText, simConfirmMessage,
     validateNumber, setpointDiff, pumpState, transferRate, dosingText, batchOutcome, alarmSummary, mainSwitchStatus,
-    createRing, sparklinePath, DEMO_FRAMES, describeBoot, sdCardStatus,
+    createRing, sparklinePath, DEMO_FRAMES, describeBoot, sdCardStatus, rebootReplyText, isNewBoot,
     historyWindow, historyWindowAt, historyStepSeconds, createHistoryAssembler, historyColumns,
     historyAppendLive, telemetryToHistoryRow, historyEventText, historyErrorText, historyNeedsReload, historyStillBusy, stepShade, demoHistoryChunks,
     HIDDEN_PAUSE_MS, IDLE_PAUSE_MS, hmiPauseReason, plcNotAnswering, LIVE_STALE_MS, liveDataState, migrateSavedLogin,
