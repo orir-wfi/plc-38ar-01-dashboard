@@ -1207,7 +1207,7 @@
         return { sp: Math.max(0, halfSP1 - p1), name: "Delay" };
       }
       if (stepData.Step === 108) {
-        var halfSP2 = stepData.Cycle_Type === 1 ? timerSP("T_13", 1800) : timerSP("T_14", 1800);
+        var halfSP2 = stepData.Cycle_Type === 1 ? timerSP("T_18", 1800) : timerSP("T_19", 1800);
         var p2 = typeof stepData.t_12 === "number" ? stepData.t_12 : 0;
         return { sp: Math.max(0, halfSP2 - p2), name: "Delay" };
       }
@@ -1237,7 +1237,9 @@
     if (typeof t.Step === "number") {
       if (t.Step === 104 || t.Step === 108) {
         // The delay SP is calculated, not T_16: half-cycle SP minus the pump's run time.
-        var hcName = t.Cycle_Type === 1 ? "T_13" : "T_14";
+        var hcName = t.Step === 104
+          ? (t.Cycle_Type === 1 ? "T_13" : "T_14")
+          : (t.Cycle_Type === 1 ? "T_18" : "T_19");
         var runName = t.Step === 104 ? "P1" : "P2";
         var runVal = t.Step === 104 ? t.t_11 : t.t_12;
         setHtml("vStepTimerSub", "Delay phase" + (target ? ' (calc: ' + hcName + ' ' + timerSP(hcName, 1800) + ' − ' + runName + ' run ' + (typeof runVal === "number" ? runVal : 0) + ' = <b class="timer-sp">' + target.sp + '</b> s)' : ""));
@@ -1256,14 +1258,18 @@
       }
     }
 
-    var halfCycleTimer = t.Cycle_Type === 1 ? t.t_13 : t.t_14;
-    var halfCycleSP = t.Cycle_Type === 1 ? timerSP("T_13", 1800) : timerSP("T_14", 1800);
+    var isTank2 = (t.Step === 108 || t.Step === 110);
+    var hcTag = isTank2 ? (t.Cycle_Type === 1 ? "T_18" : "T_19") : (t.Cycle_Type === 1 ? "T_13" : "T_14");
+    var halfCycleTimer = isTank2 ? (t.Cycle_Type === 1 ? t.t_18 : t.t_19) : (t.Cycle_Type === 1 ? t.t_13 : t.t_14);
+    var halfCycleSP = timerSP(hcTag, 1800);
+    var tankLabel = isTank2 ? "Tank 2" : "Tank 1";
+    var typeLabel = t.Cycle_Type === 1 ? "Large" : "Small";
     if (typeof halfCycleTimer === "number") {
       setHtml("vCycleTimer", '<span class="timer-run">' + halfCycleTimer + '</span> / <b class="timer-sp">' + halfCycleSP + '</b> s');
-      setHtml("vCycleTimerSub", t.Cycle_Type === 1 ? 'Large half-cycle (SP T_13: <b class="timer-sp">' + halfCycleSP + '</b> s)' : 'Small half-cycle (SP T_14: <b class="timer-sp">' + halfCycleSP + '</b> s)');
+      setHtml("vCycleTimerSub", tankLabel + ' ' + typeLabel + ' half-cycle (SP ' + hcTag + ': <b class="timer-sp">' + halfCycleSP + '</b> s)');
     } else {
       setHtml("vCycleTimer", '— / <b class="timer-sp">' + halfCycleSP + '</b> s');
-      setHtml("vCycleTimerSub", t.Cycle_Type === 1 ? "Large half-cycle (T_13)" : "Small half-cycle (T_14)");
+      setHtml("vCycleTimerSub", tankLabel + ' ' + typeLabel + ' half-cycle (' + hcTag + ')');
     }
 
     renderPumps(t);
@@ -1279,7 +1285,7 @@
     if (!window.hmiIsOperator()) return; // viewer: pump states fall back to the step
     readPoints(["SP_L3", "P1_ON", "P2_ON", "P3_ON", "P4_ON", "DP1_ON",
                 "P1_Mode", "P2_Mode", "P3_Mode", "P4_Mode", "DP1_Mode", "B14",
-                "T_11", "T_12", "T_13", "T_14", "T_16"], function(resp){
+                "T_11", "T_12", "T_13", "T_14", "T_16", "T_18", "T_19"], function(resp){
       if (!resp.ok) return;
       if (typeof resp.values.SP_L3 === "number" && resp.values.SP_L3 > 0) levelFullScaleCm = resp.values.SP_L3;
       Object.assign(coils, resp.values);
@@ -1324,7 +1330,7 @@
     if (!t || t.Step === 100) return;
     var elapsed = Math.floor((Date.now() - lastTeleAt) / 1000);
     var liveT16 = lastT16 + elapsed;
-    var target = (typeof coils.T_11 === "number" || typeof coils.T_13 === "number") ? (function(){
+    var target = (typeof coils.T_11 === "number" || typeof coils.T_13 === "number" || typeof coils.T_18 === "number") ? (function(){
       if (t.Step === 106) return { sp: (typeof coils.T_11 === "number" ? coils.T_11 : 900) };
       if (t.Step === 110) return { sp: (typeof coils.T_12 === "number" ? coils.T_12 : 900) };
       if (t.Step === 104) {
@@ -1332,7 +1338,7 @@
         return { sp: Math.max(0, hsp1 - (typeof t.t_11 === "number" ? t.t_11 : 0)) };
       }
       if (t.Step === 108) {
-        var hsp2 = t.Cycle_Type === 1 ? (typeof coils.T_13 === "number" ? coils.T_13 : 1800) : (typeof coils.T_14 === "number" ? coils.T_14 : 1800);
+        var hsp2 = t.Cycle_Type === 1 ? (typeof coils.T_18 === "number" ? coils.T_18 : 1800) : (typeof coils.T_19 === "number" ? coils.T_19 : 1800);
         return { sp: Math.max(0, hsp2 - (typeof t.t_12 === "number" ? t.t_12 : 0)) };
       }
       if (t.Step === 102) return { sp: 3 };

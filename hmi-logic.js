@@ -75,8 +75,10 @@
     { name: 'SP_F04', group: 'Dosing', label: 'Dosing pump stroke length', unit: '%', min: 0, max: 100 },
     { name: 'T_11', group: 'Timers', label: 'P1 On Timer (max run time)', unit: 'sec', min: 0, max: 86400 },
     { name: 'T_12', group: 'Timers', label: 'P2 On Timer (max run time)', unit: 'sec', min: 0, max: 86400 },
-    { name: 'T_13', group: 'Timers', label: 'Timer Half cycle large', unit: 'sec', min: 0, max: 86400 },
-    { name: 'T_14', group: 'Timers', label: 'Timer Half cycle small', unit: 'sec', min: 0, max: 86400 },
+    { name: 'T_13', group: 'Timers', label: 'Timer Half cycle large (Tank 1)', unit: 'sec', min: 0, max: 86400 },
+    { name: 'T_14', group: 'Timers', label: 'Timer Half cycle small (Tank 1)', unit: 'sec', min: 0, max: 86400 },
+    { name: 'T_18', group: 'Timers', label: 'Timer Half cycle large (Tank 2)', unit: 'sec', min: 0, max: 86400 },
+    { name: 'T_19', group: 'Timers', label: 'Timer Half cycle small (Tank 2)', unit: 'sec', min: 0, max: 86400 },
     { name: 'T_15', group: 'Timers', label: 'Time to change SP_F02', unit: 'min', min: 0, max: 65535 },
     { name: 'T_16', group: 'Timers', label: 'Step Timer', unit: 'sec', min: 0, max: 86400 },
     { name: 'T_17', group: 'Timers', label: 'LTCR rate window', unit: 'sec', min: 10, max: 3600 },
@@ -865,11 +867,19 @@
         return '0 s';
       case 'T_13':
         if (typeof t.t_13 === 'number') return t.t_13 + ' s';
-        if (t.Cycle_Type === 1 && typeof t.t_16 === 'number') return t.t_16 + ' s';
+        if (t.Cycle_Type === 1 && typeof t.t_16 === 'number' && (t.Step === 104 || t.Step === 106)) return t.t_16 + ' s';
         return '0 s';
       case 'T_14':
         if (typeof t.t_14 === 'number') return t.t_14 + ' s';
-        if (t.Cycle_Type === 0 && typeof t.t_16 === 'number') return t.t_16 + ' s';
+        if (t.Cycle_Type === 0 && typeof t.t_16 === 'number' && (t.Step === 104 || t.Step === 106)) return t.t_16 + ' s';
+        return '0 s';
+      case 'T_18':
+        if (typeof t.t_18 === 'number') return t.t_18 + ' s';
+        if (t.Cycle_Type === 1 && typeof t.t_16 === 'number' && (t.Step === 108 || t.Step === 110)) return t.t_16 + ' s';
+        return '0 s';
+      case 'T_19':
+        if (typeof t.t_19 === 'number') return t.t_19 + ' s';
+        if (t.Cycle_Type === 0 && typeof t.t_16 === 'number' && (t.Step === 108 || t.Step === 110)) return t.t_16 + ' s';
         return '0 s';
       case 'T_15':
         if (typeof t.t_15 === 'number') return t.t_15 + ' min';
