@@ -1,0 +1,27 @@
+name: EMQX Keepalive Heartbeat
+
+on:
+  schedule:
+    # Runs on the 1st and 15th of every month at 06:00 UTC
+    - cron: '0 6 1,15 * *'
+  workflow_dispatch: # Enables manual trigger button
+
+jobs:
+  mqtt-ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install Mosquitto Client
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq mosquitto-clients
+
+      - name: Publish Keepalive Message
+        run: |
+          mosquitto_pub \
+            -h "${{ secrets.EMQX_HOST }}" \
+            -p 8883 \
+            -u "${{ secrets.EMQX_USER }}" \
+            -P "${{ secrets.EMQX_PASS }}" \
+            -t "keepalive/ping" \
+            -m '{"status":"ok","source":"github-actions"}' \
+            -d
