@@ -1,0 +1,2913 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="color-scheme" content="only light">
+<title>SS2 PLC Web HMI</title>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<script src="https://cdn.jsdelivr.net/npm/mqtt@5.10.1/dist/mqtt.min.js" integrity="sha384-u4uqeACkFcoKl57rBQJHVGDd1pqhW4w8X3WjTu1ZksPdxoLqdt34jpoNkJisE25W" crossorigin="anonymous"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/uplot@1.6.31/dist/uPlot.min.css" integrity="sha384-IfV0B7MIOYuO95kO9G5ySKPz/85zqFNOAs8iy4tkK5zd9izhJAB8b7lHrwYqqmYE" crossorigin="anonymous">
+<script src="https://cdn.jsdelivr.net/npm/uplot@1.6.31/dist/uPlot.iife.min.js" integrity="sha384-XMP23k7YSCFr13Xrkxh4IO0v1W+8fB6AP+3Vycxphp2Z0V2vocAZHyuGaFCysrtM" crossorigin="anonymous"></script>
+<script src="hmi-logic.js"></script>
+<style>
+  /* ISA-101 (hmi-design-full): light-only, neutral gray background, off-white
+     panels. Colour carries meaning only: red = alarm/fault, amber = warning,
+     magenta = simulation, teal = navigation/submit. No green, nothing blinks. */
+  :root{
+    color-scheme: only light; /* stops phone browsers force-darkening the page */
+    --bg:#e3e5e6; --surface:#f6f7f7; --surface-2:#eceeee; --border:#c8cccd;
+    --ink:#1c2326; --ink-2:#4a5357; --ink-3:#6f787c;
+    --equip:#4a5357; --level:#9fb4b8;
+    --pipe:#aeb4b7; --pipe-active:#1c2326;
+    --chem:#8fb0cc; --chem-active:#1f5a8c; /* sugar solution lines; not an alarm/sim colour */
+    --accent:#0e7c86; --accent-ink:#ffffff; --accent-tint:#dcebec;
+    --warning:#966018; --critical:#c23b3b; --critical-tint:#fbeaea;
+    --sim:#b0269f; --sim-tint:#f7e3f5; --sim-ink:#8a1a82;
+    --focus:#0e7c86; --shadow: 0 1px 2px rgba(28,35,38,.08);
+  }
+  *{box-sizing:border-box;}
+  body{ margin:0; background:var(--bg); color:var(--ink); font-family:"IBM Plex Sans",system-ui,sans-serif; font-size:14px; line-height:1.5; overflow-x:hidden; }
+  [hidden]{ display:none !important; }
+  .mono{ font-family:"IBM Plex Mono",Consolas,monospace; font-variant-numeric:tabular-nums; }
+  .muted{ color:var(--ink-3); } .small{ font-size:12px; }
+  .wrap{ max-width:1100px; margin:0 auto; padding:14px 16px 56px; }
+  h2.sec{ font-size:14.5px; font-weight:600; margin:0 0 10px; }
+  :focus-visible{ outline:2px solid var(--focus); outline-offset:2px; }
+
+  /* Header */
+  /* Header + SIM strip stick together so the strip never scrolls away. */
+  .topbar{ position:sticky; top:0; z-index:20; }
+  /* --topbar-h is measured live (script below) - the SIM strip wraps to 2-3
+     lines on narrow screens, so no fixed guess fits every case. */
+  #simPanel{ scroll-margin-top:calc(var(--topbar-h, 56px) + 12px); }
+  header#hdr{ display:flex; align-items:center; gap:10px; padding:8px 16px; background:var(--surface); border-bottom:1px solid var(--border); }
+  .brand{ font-weight:700; }
+  nav#dash-nav{ display:flex; gap:4px; }
+  nav#dash-nav button{ font:inherit; font-size:13px; font-weight:600; border:0; background:transparent; color:var(--ink-2); padding:8px 14px; border-radius:8px; cursor:pointer; }
+  nav#dash-nav button:hover{ background:var(--surface-2); }
+  nav#dash-nav button.active{ background:var(--accent-tint); color:var(--accent); }
+  .hdr-right{ margin-left:auto; display:flex; gap:8px; align-items:center; }
+  .pill{ display:inline-flex; align-items:center; gap:7px; padding:4px 10px; border-radius:100px; font-size:12.5px; font-weight:600; border:1px solid var(--border); background:var(--surface); color:var(--ink-2); }
+  .pill .dot{ width:7px; height:7px; border-radius:50%; background:var(--ink-3); }
+  .pill.stale{ color:var(--warning); border-color:var(--warning); } .pill.stale .dot{ background:var(--warning); }
+  .pill.down{ color:var(--critical); border-color:var(--critical); } .pill.down .dot{ background:var(--critical); }
+  .pill.on{ color:var(--accent); border-color:var(--accent); } .pill.on .dot{ background:var(--accent); }
+  .pill.off{ color:var(--critical); border-color:var(--critical); background:var(--critical-tint); } .pill.off .dot{ background:var(--critical); }
+  .switch-pill{ padding:3px 9px; font-size:12px; }
+  .alarm-btn{ font:inherit; font-size:12.5px; font-weight:600; border:1px solid var(--border); background:var(--surface); color:var(--ink-2); padding:5px 10px; border-radius:8px; cursor:pointer; }
+  .alarm-btn.active{ border:2px solid var(--critical); color:var(--critical); background:var(--critical-tint); }
+  .alarm-btn.fault-btn.active{ border:2px solid var(--critical); color:var(--critical); background:var(--critical-tint); }
+  .alarm-btn.alert-btn.active{ border:2px solid var(--warning); color:var(--warning); background:rgba(217,119,6,0.12); }
+  .timer-sp{ font-weight:700; color:var(--ink); }
+  .timer-run{ font-weight:400; color:var(--ink-2); }
+  /* Live-data loss (orir 2026-10-05): a frozen page must not look normal.
+     Large warning bar like the simulation strip + every page's values faded
+     and greyed. Steady, never blinking (ISA-101). */
+  .stale-strip{ display:block; width:100%; font:inherit; font-size:16px; font-weight:700; background:#fbf1e1; color:#6b4410; border:0; border-bottom:3px solid var(--warning); padding:10px 16px; }
+  .stale-strip small{ display:block; font-size:12.5px; font-weight:500; margin-top:2px; }
+  body.data-stale .page:not(#signin){ opacity:.42; filter:grayscale(1); transition:opacity .3s, filter .3s; }
+  .lastseen{ font-size:11.5px; color:var(--ink-3); padding:4px 16px 0; max-width:1100px; margin:0 auto; }
+  .sim-strip{ display:block; width:100%; text-align:left; font:inherit; font-size:13px; font-weight:700; background:var(--sim-tint); color:var(--sim-ink); border:0; border-bottom:2px solid var(--sim); padding:6px 16px; cursor:pointer; }
+
+  /* Panels, fields, buttons */
+  section.panel{ background:var(--surface); border:1px solid var(--border); border-radius:10px; box-shadow:var(--shadow); margin-bottom:14px; overflow:hidden; }
+  .panel-head{ display:flex; align-items:center; justify-content:space-between; gap:12px; padding:12px 16px; border-bottom:1px solid var(--border); }
+  .panel-head h2{ margin:0; font-size:14.5px; font-weight:600; }
+  .panel-body{ padding:14px 16px 16px; }
+  .panel.collapsed .panel-body{ display:none; }
+  .field{ margin-bottom:10px; }
+  .field label{ display:block; font-size:12px; color:var(--ink-2); margin-bottom:4px; font-weight:500; }
+  .field input, .sim-row input, .sim-row select{ width:100%; background:var(--surface-2); border:1px solid var(--border); box-shadow:inset 0 1px 2px rgba(0,0,0,.08); border-radius:6px; padding:7px 9px; color:var(--ink); font-size:13px; font-family:"IBM Plex Mono",monospace; }
+  button.primary{ font:inherit; font-size:13px; font-weight:600; background:var(--accent); color:var(--accent-ink); border-radius:8px; border:none; padding:8px 16px; cursor:pointer; }
+  button.secondary{ font:inherit; font-size:13px; font-weight:600; background:var(--surface); color:var(--ink-2); border:1px solid var(--border); border-radius:8px; padding:7px 12px; cursor:pointer; }
+  /* Process actions look different from navigation and form submit. */
+  button.action{ font:inherit; font-size:13px; font-weight:700; background:var(--surface); color:var(--ink); border:2px solid var(--ink); border-radius:8px; padding:7px 14px; cursor:pointer; }
+  button:disabled{ opacity:.5; cursor:default; }
+  .conn-error{ margin-top:10px; font-size:12.5px; color:var(--critical); display:none; }
+  .conn-error.show{ display:block; }
+  .signin{ max-width:380px; margin:40px auto; }
+  details.advanced{ margin:4px 0 12px; font-size:12.5px; color:var(--ink-2); }
+
+  /* Overview */
+  .ov-grid{ display:grid; grid-template-columns:3fr 1fr; gap:14px; align-items:start; }
+  #mimicSvg{ width:100%; height:auto; display:block; }
+  .kv{ padding:8px 0; border-bottom:1px solid var(--border); }
+  .kv:last-child{ border-bottom:0; }
+  .kv .k{ font-size:11.5px; color:var(--ink-3); }
+  .kv .v{ font-size:18px; font-weight:600; display:inline-block; }
+  .kv .sub{ font-size:12px; color:var(--ink-2); }
+  .inlet-set-btn{ margin-left:8px; padding:3px 10px !important; vertical-align:middle; }
+  .inlet-set{ display:flex; flex-wrap:wrap; align-items:center; gap:6px; margin-top:6px; }
+  .inlet-set[hidden]{ display:none; }
+  .inlet-set-break{ flex-basis:100%; height:0; }
+  .inlet-set input{ flex:0 1 110px; min-width:0; background:var(--surface-2); border:1px solid var(--border); box-shadow:inset 0 1px 2px rgba(0,0,0,.08); border-radius:6px; padding:6px 8px; font-family:"IBM Plex Mono",monospace; font-size:13px; color:var(--ink); }
+  svg.spark{ width:100%; height:26px; display:block; }
+  svg.spark path{ fill:none; stroke:var(--ink-3); stroke-width:1.5; vector-effect:non-scaling-stroke; }
+  /* Equipment symbols read these custom properties through <use>. */
+  .equip{ --eq-fill:var(--surface); --eq-stroke:var(--equip); --eq-mark:var(--equip); --eq-sw:2.5; --eq-dash:none; cursor:pointer; }
+  .equip.running{ --eq-fill:var(--equip); --eq-mark:var(--surface); }
+  .equip.fault{ --eq-stroke:var(--critical); --eq-sw:3.5; }
+  .inst{ --eq-fill:var(--surface); --eq-stroke:var(--equip); --eq-sw:2; --eq-dash:none; }
+  .inst.fault{ --eq-stroke:var(--critical); --eq-sw:3; }
+  .inst.is-sim, .equip.is-sim{ --eq-stroke:var(--sim); --eq-sw:3; --eq-dash:4 2; }
+  .eq-label{ font-size:12px; fill:var(--ink); text-anchor:middle; font-weight:600; }
+  .inst-text{ font-size:10px; fill:var(--ink); text-anchor:middle; dominant-baseline:central; font-weight:600; }
+  .badge-mode rect{ fill:var(--ink); } .badge-mode text{ fill:#fff; font-size:9px; text-anchor:middle; font-weight:700; }
+  .badge-fault path{ fill:var(--critical); } .badge-fault text{ fill:#fff; font-size:9px; font-weight:700; text-anchor:middle; }
+  .badge-sim rect{ fill:var(--sim); } .badge-sim text{ fill:#fff; font-size:7.5px; font-weight:700; text-anchor:middle; }
+  .simable .sim-frame, .simable .badge-sim, .inst .badge-sim{ display:none; }
+  .simable.is-sim .sim-frame, .simable.is-sim .badge-sim, .inst.is-sim .badge-sim{ display:inline; }
+  .sim-frame{ fill:none; stroke:var(--sim); stroke-width:2; stroke-dasharray:4 2; }
+  .tank{ fill:var(--surface-2); stroke:var(--ink-3); stroke-width:1.5; }
+  .level{ fill:var(--level); }
+  .tank-title{ font-size:12px; font-weight:600; fill:var(--ink); text-anchor:middle; }
+  .tank-value{ font-size:15px; font-weight:600; fill:var(--ink); text-anchor:middle; font-family:"IBM Plex Mono",monospace; }
+  .mimic-note{ font-size:11.5px; fill:var(--ink-2); text-anchor:middle; font-family:"IBM Plex Mono",monospace; }
+  .mimic-note.start{ text-anchor:start; }
+  /* Process lines: idle = light gray, running pump's path = dark and thick.
+     No motion and no green (ISA-101: quiet when normal). */
+  .pipe path{ fill:none; stroke:var(--pipe); stroke-width:2; }
+  .pipe path.arrow{ fill:var(--pipe); stroke:none; }
+  .pipe.manual path:not(.arrow){ stroke-dasharray:6 4; }
+  .pipe.active path{ stroke:var(--pipe-active); stroke-width:3.5; }
+  .pipe.active path.arrow{ fill:var(--pipe-active); stroke:none; }
+  .pipe.chem path{ stroke:var(--chem); }
+  .pipe.chem path.arrow{ fill:var(--chem); stroke:none; }
+  .pipe.chem.active path{ stroke:var(--chem-active); }
+  .pipe.chem.active path.arrow{ fill:var(--chem-active); stroke:none; }
+  .tap{ fill:none; stroke:var(--ink-3); stroke-width:1.5; }
+  .tee{ fill:var(--pipe); }
+  .inject circle{ fill:var(--chem-active); stroke:var(--surface); stroke-width:2; }
+  .inject text{ font-size:11px; fill:var(--chem-active); font-weight:600; }
+  .step-banner{ display:flex; gap:10px; align-items:center; flex-wrap:wrap; padding:0 0 8px; margin-bottom:8px; border-bottom:1px solid var(--border); }
+  .step-banner #vStep{ font-size:17px; font-weight:600; }
+  .step-banner #vStepName{ font-size:14px; color:var(--ink-2); }
+  .html-sim.is-sim{ outline:2px dashed var(--sim); outline-offset:2px; border-radius:4px; color:var(--sim-ink); }
+  .html-sim.is-sim::after{ content:"SIM"; margin-left:6px; font-size:10px; font-weight:700; color:#fff; background:var(--sim); border-radius:3px; padding:0 4px; vertical-align:middle; font-family:"IBM Plex Sans",sans-serif; }
+
+  /* Trends */
+  .trend-controls{ display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:8px; }
+  .trend-goto summary{ cursor:pointer; font-size:13px; color:var(--ink-2); }
+  .trend-goto .row-line{ margin:8px 0 0; }
+  .trend-goto input, .trend-goto select{ background:var(--surface-2); border:1px solid var(--border); border-radius:6px; padding:5px 7px; font:inherit; font-size:13px; }
+  .trend-readout{ min-height:18px; color:var(--ink-2); margin-bottom:4px; white-space:pre-wrap; }
+  .trend-strip{ margin-bottom:2px; }
+  .trend-strip .strip-title{ font-size:11.5px; color:var(--ink-3); margin:4px 0 0; }
+  .uplot, .uplot *{ font-family:"IBM Plex Sans",system-ui,sans-serif; }
+  @media (max-width:600px){ .trend-controls .seg button{ padding:6px 10px; } }
+
+  /* Faceplate (Level 4 popup) */
+  .faceplate{ position:fixed; right:16px; top:calc(var(--topbar-h, 56px) + 8px); width:290px; z-index:30; background:var(--surface); border:1px solid var(--border); border-radius:10px; box-shadow:0 6px 24px rgba(28,35,38,.18); }
+  .seg{ display:inline-flex; border:1px solid var(--border); border-radius:8px; overflow:hidden; }
+  .seg button{ font:inherit; font-size:13px; font-weight:600; border:0; background:var(--surface); color:var(--ink-2); padding:6px 14px; cursor:pointer; }
+  .seg button.on{ background:var(--ink); color:#fff; }
+
+  /* Setpoints */
+  .sp-row{ display:grid; grid-template-columns:1fr auto 110px 54px; gap:10px; align-items:center; padding:6px 0; border-bottom:1px solid var(--border); }
+  .sp-pv{ font-family:"IBM Plex Mono",monospace; font-size:12px; color:var(--ink-2); background:var(--surface-2); padding:3px 8px; border-radius:4px; border:1px solid var(--border); white-space:nowrap; }
+  .sp-row input{ width:100%; background:var(--surface-2); border:1px solid var(--border); box-shadow:inset 0 1px 2px rgba(0,0,0,.08); border-radius:6px; padding:6px 8px; font-family:"IBM Plex Mono",monospace; font-size:13px; color:var(--ink); }
+  .sp-row input.changed{ border:2px solid var(--accent); }
+  .sp-row input.invalid{ border:2px solid var(--critical); }
+  .sp-row .err{ grid-column:1/-1; color:var(--critical); font-size:12px; }
+  .review-bar{ position:sticky; bottom:12px; display:flex; gap:10px; align-items:center; justify-content:flex-end; background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:10px 14px; box-shadow:0 4px 16px rgba(28,35,38,.15); }
+  .review-bar span{ margin-right:auto; font-weight:600; }
+  .sp-views{ margin-bottom:12px; }
+  .cal-live{ font-family:"IBM Plex Mono",monospace; font-size:14px; margin:0 0 10px; }
+  .cal-sub{ font-size:12px; font-weight:600; color:var(--ink-2); margin:12px 0 4px; }
+  .cal-row{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin:4px 0; }
+  .cal-row input{ width:110px; background:var(--surface-2); border:1px solid var(--border); box-shadow:inset 0 1px 2px rgba(0,0,0,.08); border-radius:6px; padding:6px 8px; font-family:"IBM Plex Mono",monospace; font-size:13px; }
+  .cal-row label{ font-size:13px; min-width:120px; }
+  .cal-result{ font-size:12px; }
+  .simable-html.is-sim{ outline:2px dashed var(--sim); outline-offset:2px; border-radius:4px; }
+  .simable-html.is-sim::after{ content:"  SIM · calibration uses the real reading"; color:var(--sim-ink); font-size:11px; }
+
+  /* Alarms */
+  .alarm-row{ display:flex; gap:10px; align-items:baseline; padding:8px 0; border-bottom:1px solid var(--border); }
+  .prio{ font-weight:700; }
+  .prio.fault{ color:var(--critical); } .prio.alert{ color:var(--warning); }
+  .actions{ display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:12px; }
+  ul.history{ padding-left:18px; margin:0; font-size:13px; }
+  ul.history li.alarm{ color:var(--critical); font-weight:600; }
+  ul.history li.change{ color:var(--ink-3); }
+
+  /* System */
+  .sim-row{ display:grid; grid-template-columns:1.4fr 1fr 110px auto auto; gap:10px; align-items:center; padding:8px 0; border-bottom:1px solid var(--border); }
+  .sim-row.is-sim-row{ background:var(--sim-tint); box-shadow:inset 3px 0 0 var(--sim); }
+  .row-line{ display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:10px; }
+  .row-line label{ font-size:13px; min-width:160px; }
+  .row-line input{ flex:1; max-width:300px; background:var(--surface-2); border:1px solid var(--border); border-radius:6px; padding:7px 9px; font-family:"IBM Plex Mono",monospace; }
+
+  /* Confirm dialog */
+  dialog.confirm{ border:1px solid var(--border); border-radius:10px; padding:18px; max-width:380px; background:var(--surface); color:var(--ink); }
+  dialog.confirm::backdrop{ background:rgba(28,35,38,.35); }
+  #confirmText{ white-space:pre-line; margin:0 0 14px; }
+  .dlg-actions{ display:flex; gap:8px; justify-content:flex-end; }
+
+  /* Responsive */
+  @media (max-width:900px){
+    .ov-grid{ grid-template-columns:1fr; }
+    .sim-row{ grid-template-columns:1fr 1fr; }
+  }
+  @media (max-width:600px){
+    header#hdr{ padding:8px 12px; }
+    nav#dash-nav{ position:fixed; left:0; right:0; bottom:0; z-index:25; justify-content:space-around; background:var(--surface); border-top:1px solid var(--border); padding:6px 4px calc(6px + env(safe-area-inset-bottom)); }
+    nav#dash-nav button{ padding:8px 10px; }
+    .wrap{ padding:12px 12px 90px; }
+    .values-panel{ order:-1; }
+    .values-panel .kv-list{ display:grid; grid-template-columns:1fr 1fr; gap:0 12px; }
+    .values-panel .desk-only, .values-panel svg.spark{ display:none; }
+    .faceplate{ left:12px; right:12px; width:auto; top:auto; bottom:74px; }
+    .sp-row{ grid-template-columns:1fr 90px 44px; }
+    .sp-pv{ grid-column:1 / -1; margin-top:-2px; margin-bottom:2px; }
+    .review-bar{ bottom:70px; }
+    /* The 640-wide mimic renders at ~57% on a 390 px phone, which left
+       11 px labels at ~6 px. These source sizes land at ~10-14 px. */
+    .eq-label{ font-size:20px; }
+    .inst-text{ font-size:15px; }
+    .tank-title{ font-size:21px; }
+    .tank-value{ font-size:19px; } /* must fit the SIM dashed box */
+    .mimic-note{ font-size:14px; }
+    .inject text{ font-size:15px; } /* the FT flow note sits at the left edge */
+  }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+<header id="hdr">
+  <span class="brand">SS2</span>
+  <nav id="dash-nav" aria-label="Pages">
+    <button type="button" data-page="overview" class="active">Overview</button>
+    <button type="button" data-page="trends">Trends</button>
+    <button type="button" data-page="setpoints">Setpoints</button>
+    <button type="button" data-page="alarms">Alarms</button>
+    <button type="button" data-page="system">System</button>
+  </nav>
+  <div class="hdr-right">
+    <span class="pill html-sim" data-sim-point="System_Switch" id="hdrSwitchPill" title="Main System Switch on PLC panel"><span class="dot"></span><span id="hdrSwitchText">Main switch: —</span></span>
+    <span class="pill" id="statusPill"><span class="dot"></span><span id="statusText">Not connected</span></span>
+    <button type="button" class="alarm-btn fault-btn" id="faultBtn" title="Active faults">0 Faults</button>
+    <button type="button" class="alarm-btn alert-btn" id="alertBtn" title="Active alerts">0 Alerts</button>
+  </div>
+</header>
+<button type="button" class="sim-strip" id="simStrip" hidden></button>
+<div class="stale-strip" id="staleStrip" role="alert" hidden></div>
+</div>
+<div class="lastseen mono" id="lastSeen">No telemetry received yet</div>
+
+<div id="signin" class="page">
+<div class="wrap">
+  <section class="panel signin">
+    <div class="panel-body">
+      <h2 class="sec">Sign in</h2>
+      <p class="muted small" style="margin-top:-6px">SS2 TAYA denitrification pilot, Web HMI</p>
+      <form id="connForm">
+        <div class="field"><label for="fUser">Username</label><input id="fUser" name="username" type="text" autocomplete="username" required></div>
+        <div class="field"><label for="fPass">Password</label><input id="fPass" name="password" type="password" autocomplete="current-password"></div>
+        <details class="advanced"><summary>Advanced</summary>
+          <div class="field"><label for="fHost">Broker host</label><input id="fHost" name="host" type="text" autocomplete="off"></div>
+          <div class="field"><label for="fPort">WSS port</label><input id="fPort" name="port" type="text" inputmode="numeric" autocomplete="off"></div>
+        </details>
+        <button type="submit" class="primary" id="connectBtn">Sign in</button>
+      </form>
+      <div class="conn-error" id="connError"></div>
+    </div>
+  </section>
+</div>
+</div>
+
+<dialog class="confirm" id="confirmDialog">
+  <p id="confirmText"></p>
+  <div class="dlg-actions">
+    <button type="button" class="secondary" id="confirmCancel">Cancel</button>
+    <button type="button" class="primary" id="confirmOk">Confirm</button>
+  </div>
+</dialog>
+
+<dialog class="confirm" id="pauseDialog">
+  <p id="pauseText">Paused to save data.</p>
+  <div class="dlg-actions">
+    <button type="button" class="primary" id="pauseResume">Resume</button>
+  </div>
+</dialog>
+
+<div class="faceplate" id="faceplate" hidden role="dialog" aria-labelledby="fpTitle">
+  <div class="panel-head">
+    <h2 id="fpTitle">—</h2>
+    <div style="display:flex;gap:6px">
+      <button type="button" class="secondary" id="fpPin">Pin</button>
+      <button type="button" class="secondary" id="fpClose" aria-label="Close">&#x2715;</button>
+    </div>
+  </div>
+  <div class="panel-body">
+    <div class="kv"><div class="k">State</div><div class="v" id="fpState">—</div></div>
+    <div class="kv" id="fpTimerRow" hidden><div class="k">Run timer</div><div class="v mono" id="fpTimerVal">—</div></div>
+    <div class="kv" id="fpModeRow"><div class="k">Mode</div>
+      <div class="seg" id="fpMode"><button type="button" data-mode="0">Auto</button><button type="button" data-mode="1">Manual</button></div>
+      <span class="muted small" id="fpModeUnknown" hidden style="margin-left:8px">Mode unknown</span>
+    </div>
+    <div class="kv" id="fpDpModeRow" hidden style="align-items:flex-start">
+      <div class="k" style="padding-top:4px">Mode</div>
+      <div style="flex:1">
+        <div class="seg" id="fpDpMode" style="display:flex; flex-direction:column; width:100%; border:1px solid var(--border); border-radius:8px; overflow:hidden">
+          <button type="button" data-dpmode="manual" style="padding:7px 10px; border-bottom:1px solid var(--border); text-align:left">Manual</button>
+          <button type="button" data-dpmode="auto-no3" style="padding:7px 10px; border-bottom:1px solid var(--border); text-align:left">Auto (NO3)</button>
+          <button type="button" data-dpmode="auto-fixed" style="padding:7px 10px; text-align:left">Auto (fixed flow)</button>
+        </div>
+        <span class="muted small" id="fpDpModeUnknown" hidden style="display:block; margin-top:4px">Mode unknown</span>
+        <div class="muted small" id="fpDpRate" style="margin-top:6px"></div>
+      </div>
+    </div>
+    <div class="kv" id="fpManual" hidden>
+      <div class="k">Manual control</div>
+      <div class="actions" style="margin:4px 0 0">
+        <button type="button" class="action" id="fpStart">Start</button>
+        <button type="button" class="action" id="fpStop">Stop</button>
+      </div>
+    </div>
+    <p class="muted small" id="fpNote" style="margin:8px 0 0"></p>
+    <p class="small" id="fpResult" style="margin:4px 0 0"></p>
+  </div>
+</div>
+
+<div id="page-overview" class="page" hidden>
+<div class="wrap">
+  <div class="ov-grid">
+    <section class="panel mimic-panel">
+      <div class="panel-body">
+        <div class="step-banner">
+          <span class="mono" id="vStep">—</span><span id="vStepName"></span>
+          <div class="actions" style="margin:0 0 0 auto; display:flex; gap:8px; align-items:center;">
+            <span class="pill timer-pill" id="stepTimerBadge" title="Running step timer (t_16)"><span class="dot"></span><span id="stepTimerBadgeText">Step: —</span></span>
+            <span class="pill switch-pill html-sim" data-sim-point="System_Switch" id="mainSwitchBadge" title="Main System Switch on PLC panel"><span class="dot"></span><span id="mainSwitchText">Main switch: —</span></span>
+            <span class="muted small" id="process-run-status">Run permission: unknown</span>
+            <button type="button" class="action" id="hmi-start-btn">Start</button>
+            <button type="button" class="action" id="hmi-stop-btn">Stop</button>
+            <span id="process-action-result" class="small"></span>
+          </div>
+        </div>
+        <svg id="mimicSvg" viewBox="0 -8 770 388" role="img" aria-label="Pilot skid schematic">
+          <defs>
+            <symbol id="sym-pump" viewBox="-16 -16 32 32">
+              <circle r="13" style="fill:var(--eq-fill);stroke:var(--eq-stroke);stroke-width:var(--eq-sw);stroke-dasharray:var(--eq-dash)"/>
+              <path d="M-5,-7 L9,0 L-5,7Z" style="fill:var(--eq-mark)"/>
+            </symbol>
+            <symbol id="sym-dosing" viewBox="-16 -16 32 32">
+              <rect x="-12" y="-12" width="24" height="24" style="fill:var(--eq-fill);stroke:var(--eq-stroke);stroke-width:var(--eq-sw);stroke-dasharray:var(--eq-dash)"/>
+              <path d="M-5,-6 L6,0 L-5,6Z" style="fill:var(--eq-mark)"/>
+              <line x1="-12" y1="12" x2="12" y2="-12" style="stroke:var(--eq-mark);stroke-width:1.5"/>
+            </symbol>
+            <symbol id="sym-inst" viewBox="-16 -16 32 32">
+              <circle r="13" style="fill:var(--eq-fill);stroke:var(--eq-stroke);stroke-width:var(--eq-sw);stroke-dasharray:var(--eq-dash)"/>
+            </symbol>
+          </defs>
+
+          <!-- Process lines first so equipment draws on top. Layout follows
+               T1052D-420-01-D1, except the sugar tank/DP1/P3 sit in the middle as
+               on the skid. A line goes dark while the pump on it runs. -->
+          <g class="pipe" id="pipeFeed">
+            <path d="M700,352 V278"/><path d="M700,246 V24 H320 V50"/>
+            <path class="arrow" d="M695,346 L700,338 L705,346Z"/>
+            <path class="arrow" d="M580,19 L572,24 L580,29Z"/>
+          </g>
+          <!-- Which tank gets the feed is a manual valve with no feedback: both branches dashed. -->
+          <g class="pipe manual" id="pipeFeedT1">
+            <path d="M320,50 H120 V72"/><path class="arrow" d="M115,72 L120,80 L125,72Z"/>
+          </g>
+          <g class="pipe manual" id="pipeFeedT2">
+            <path d="M320,50 H520 V72"/><path class="arrow" d="M515,72 L520,80 L525,72Z"/>
+          </g>
+          <text class="mimic-note" x="210" y="42">Feed: TAYA 1 or 2 (manual)</text>
+          <g class="pipe chem" id="pipeDose">
+            <path d="M370,160 H408"/><path d="M420,148 V56 A6,6 0 0 0 420,44 V24"/>
+            <path class="arrow" d="M415,106 L420,98 L425,106Z"/>
+          </g>
+          <g class="inject"><circle cx="420" cy="24" r="5.5"/><text x="432" y="10">Sugar injection</text></g>
+          <g class="pipe chem" id="pipeCirc">
+            <path d="M290,180 H245 V166"/><path d="M245,134 V110 H282"/>
+            <path class="arrow" d="M282,105 L290,110 L282,115Z"/>
+          </g>
+          <g class="pipe" id="pipeP1">
+            <path d="M180,222 H254"/><path d="M286,222 H452"/>
+            <path class="arrow" d="M452,217 L460,222 L452,227Z"/>
+          </g>
+          <g class="pipe" id="pipeP2">
+            <path d="M460,270 H406"/><path d="M374,270 H188"/>
+            <path class="arrow" d="M188,265 L180,270 L188,275Z"/>
+          </g>
+          <!-- Overflow from either tank (manual valves) to the settling tank. -->
+          <g class="pipe" id="pipeEff">
+            <path d="M580,96 H630 V346"/><path d="M60,92 H16 V330 H630"/>
+            <path class="arrow" d="M625,346 L630,354 L635,346Z"/>
+          </g>
+          <circle class="tee" cx="630" cy="330" r="3"/>
+          <text class="mimic-note" x="622" y="356" style="text-anchor:end">Effluent</text>
+          <text class="mimic-note" x="700" y="370">Influent</text>
+
+          <!-- LTCR transfer rate of the running P1/P2 (drain of the pumped tank / fill of the other) -->
+          <text class="mimic-note" id="mimicXferP1" x="360" y="240"></text>
+          <text class="mimic-note" id="mimicXferP2" x="282" y="288"></text>
+
+          <!-- T-1 TAYA 1 (left) -->
+          <rect class="tank" x="60" y="80" width="120" height="200" rx="4"/>
+          <rect class="level" id="mimicLT01Bar" x="62" y="278" width="116" height="0"/>
+          <g class="simable" data-sim-point="LT01">
+            <rect class="sim-frame" x="76" y="141" width="88" height="26" rx="4"/>
+            <text class="tank-value" id="mimicLT01Value" x="120" y="160">—</text>
+            <g class="badge-sim" transform="translate(156,137)"><rect x="-12" y="-7" width="24" height="12" rx="2"/><text y="2">SIM</text></g>
+          </g>
+          <text class="tank-title" x="120" y="300">TAYA 1</text>
+          <path class="tap" d="M52,150 H60"/>
+          <g class="inst" data-sim-point="LT01" transform="translate(38,150)">
+            <use href="#sym-inst" x="-14" y="-14" width="28" height="28"/><text class="inst-text">LT</text>
+            <g class="badge-sim" transform="translate(14,-14)"><rect x="-12" y="-7" width="24" height="12" rx="2"/><text y="2">SIM</text></g>
+          </g>
+
+          <!-- T-2 TAYA 2 (right) -->
+          <rect class="tank" x="460" y="80" width="120" height="200" rx="4"/>
+          <rect class="level" id="mimicLT02Bar" x="462" y="278" width="116" height="0"/>
+          <g class="simable" data-sim-point="LT02">
+            <rect class="sim-frame" x="476" y="141" width="88" height="26" rx="4"/>
+            <text class="tank-value" id="mimicLT02Value" x="520" y="160">—</text>
+            <g class="badge-sim" transform="translate(556,137)"><rect x="-12" y="-7" width="24" height="12" rx="2"/><text y="2">SIM</text></g>
+          </g>
+          <text class="tank-title" x="520" y="300">TAYA 2</text>
+          <path class="tap" d="M580,140 H588"/>
+          <g class="inst" data-sim-point="LT02" transform="translate(602,140)">
+            <use href="#sym-inst" x="-14" y="-14" width="28" height="28"/><text class="inst-text">LT</text>
+            <g class="badge-sim" transform="translate(14,-14)"><rect x="-12" y="-7" width="24" height="12" rx="2"/><text y="2">SIM</text></g>
+          </g>
+
+          <!-- T-3 sugar tank (middle) with LS0 -->
+          <text class="tank-title" x="330" y="94">Sugar tank</text>
+          <rect class="tank" x="290" y="100" width="80" height="90" rx="4"/>
+          <g class="inst" id="mimicLS0" data-sim-point="LS0_low" transform="translate(330,138)">
+            <use href="#sym-inst" x="-14" y="-14" width="28" height="28"/><text class="inst-text">LS</text>
+            <g class="badge-sim" transform="translate(16,-14)"><rect x="-12" y="-7" width="24" height="12" rx="2"/><text y="2">SIM</text></g>
+          </g>
+          <text class="mimic-note" id="mimicLS0Label" x="330" y="178">—</text>
+
+          <!-- Feed riser, bottom to top: influent, NO3-01, P4, FT101 -->
+          <g class="inst" data-sim-point="AIT01_NO3" transform="translate(700,310)">
+            <use href="#sym-inst" x="-14" y="-14" width="28" height="28"/><text class="inst-text" style="font-size:8.5px">NO3</text>
+            <g class="badge-sim" transform="translate(14,-14)"><rect x="-12" y="-7" width="24" height="12" rx="2"/><text y="2">SIM</text></g>
+          </g>
+          <text class="mimic-note start" id="mimicNo3" x="718" y="308">—</text><text class="mimic-note start" x="718" y="322">ppm</text>
+          <g class="inst" data-sim-point="FT101_P" transform="translate(700,172)">
+            <use href="#sym-inst" x="-14" y="-14" width="28" height="28"/><text class="inst-text">FT</text>
+            <g class="badge-sim" transform="translate(14,-14)"><rect x="-12" y="-7" width="24" height="12" rx="2"/><text y="2">SIM</text></g>
+          </g>
+          <text class="mimic-note start" id="mimicFlow" x="718" y="170">—</text><text class="mimic-note start" x="718" y="184">L/h</text>
+
+          <!-- Pumps -->
+          <g id="eqP4" class="equip" data-pump="P4" transform="translate(700,262)" tabindex="0" role="button" aria-label="Pump P4">
+            <use href="#sym-pump" x="-16" y="-16" width="32" height="32" transform="rotate(-90)"/><text class="eq-label" x="20" y="5" style="text-anchor:start">P4</text>
+            <g class="badge-mode" style="display:none"><rect x="7" y="-24" width="13" height="13" rx="2"/><text x="13.5" y="-14.5">M</text></g>
+            <g class="badge-fault" style="display:none"><path d="M-12,-26 L-2,-9 L-22,-9Z"/><text x="-12" y="-11">!</text></g>
+          </g>
+          <g id="eqP1" class="equip" data-pump="P1" transform="translate(270,222)" tabindex="0" role="button" aria-label="Pump P1">
+            <use href="#sym-pump" x="-16" y="-16" width="32" height="32"/><text class="eq-label" y="31">P1</text>
+            <g class="badge-mode" style="display:none"><rect x="7" y="-24" width="13" height="13" rx="2"/><text x="13.5" y="-14.5">M</text></g>
+            <g class="badge-fault" style="display:none"><path d="M-12,-26 L-2,-9 L-22,-9Z"/><text x="-12" y="-11">!</text></g>
+          </g>
+          <g id="eqP2" class="equip" data-pump="P2" transform="translate(390,270)" tabindex="0" role="button" aria-label="Pump P2">
+            <use href="#sym-pump" x="-16" y="-16" width="32" height="32" transform="scale(-1,1)"/><text class="eq-label" y="31">P2</text>
+            <g class="badge-mode" style="display:none"><rect x="7" y="-24" width="13" height="13" rx="2"/><text x="13.5" y="-14.5">M</text></g>
+            <g class="badge-fault" style="display:none"><path d="M-12,-26 L-2,-9 L-22,-9Z"/><text x="-12" y="-11">!</text></g>
+          </g>
+          <g id="eqP3" class="equip" data-pump="P3" transform="translate(245,150)" tabindex="0" role="button" aria-label="Pump P3">
+            <use href="#sym-pump" x="-16" y="-16" width="32" height="32" transform="rotate(-90)"/><text class="eq-label" x="-20" y="4" style="text-anchor:end">P3</text>
+            <g class="badge-mode" style="display:none"><rect x="7" y="-24" width="13" height="13" rx="2"/><text x="13.5" y="-14.5">M</text></g>
+            <g class="badge-fault" style="display:none"><path d="M-12,-26 L-2,-9 L-22,-9Z"/><text x="-12" y="-11">!</text></g>
+          </g>
+          <g id="eqDP1" class="equip" data-pump="DP1" transform="translate(420,160)" tabindex="0" role="button" aria-label="Dosing pump DP1">
+            <use href="#sym-dosing" x="-16" y="-16" width="32" height="32"/><text class="eq-label" y="29">DP1</text>
+            <g class="badge-mode" style="display:none"><rect x="7" y="-24" width="13" height="13" rx="2"/><text x="13.5" y="-14.5">M</text></g>
+            <g class="badge-fault" style="display:none"><path d="M-12,-26 L-2,-9 L-22,-9Z"/><text x="-12" y="-11">!</text></g>
+          </g>
+          <text class="mimic-note" id="mimicDosing" x="420" y="207">—</text>
+        </svg>
+        <p class="muted small" style="margin:6px 0 0">Tap a pump for details. Solid pump = running, hollow = stopped, M = manual. Dark line = flow path of a running pump; blue = sugar solution.</p>
+      </div>
+    </section>
+
+    <section class="panel values-panel">
+      <div class="panel-body kv-list">
+        <div class="kv"><div class="k">Inlet flow</div><div class="v mono html-sim" data-sim-point="FT101_P" id="vFlow">—</div>
+          <svg class="spark" viewBox="0 0 200 26" preserveAspectRatio="none"><path id="sparkFlow"/></svg></div>
+        <div class="kv"><div class="k">NO3</div><div class="v mono html-sim" data-sim-point="AIT01_NO3" id="vNo3">—</div><div class="sub" id="vNo3Avg"></div>
+          <svg class="spark" viewBox="0 0 200 26" preserveAspectRatio="none"><path id="sparkNo3"/></svg></div>
+        <div class="kv"><div class="k">Dosing</div><div class="v mono" id="vDosing">—</div></div>
+        <div class="kv"><div class="k">Inlet total (FT101)</div><div class="v mono" id="vInletTotal">—</div>
+          <button type="button" class="secondary inlet-set-btn" id="inletSetBtn" hidden>Set…</button>
+          <div class="inlet-set" id="inletSetRow" hidden>
+            <input type="number" id="inletSetInput" min="0" max="99999.999" step="0.001" inputmode="decimal" aria-label="New inlet total in cubic metres">
+            <span class="small">m³</span>
+            <span class="inlet-set-break"></span>
+            <button type="button" class="secondary" id="inletSetApply">Apply</button>
+            <button type="button" class="secondary" id="inletSetCancel">Cancel</button>
+          </div>
+          <div class="sub" id="inletSetResult"></div></div>
+        <div class="kv"><div class="k">Main switch</div><div class="v mono html-sim" data-sim-point="System_Switch" id="vMainSwitch">—</div></div>
+        <div class="kv"><div class="k">Step timer (t_16)</div><div class="v mono" id="vStepTimer">—</div><div class="sub" id="vStepTimerSub"></div></div>
+        <div class="kv"><div class="k">Half-cycle timer</div><div class="v mono" id="vCycleTimer">—</div><div class="sub" id="vCycleTimerSub"></div></div>
+        <div class="kv desk-only"><div class="k">TAYA 1 level</div><div class="v mono html-sim" data-sim-point="LT01" id="vLt01">—</div>
+          <svg class="spark" viewBox="0 0 200 26" preserveAspectRatio="none"><path id="sparkLt01"/></svg></div>
+        <div class="kv desk-only"><div class="k">TAYA 2 level</div><div class="v mono html-sim" data-sim-point="LT02" id="vLt02">—</div>
+          <svg class="spark" viewBox="0 0 200 26" preserveAspectRatio="none"><path id="sparkLt02"/></svg></div>
+        <div class="kv"><div class="k">Transfer rate (LTCR)</div><div class="v mono" id="vXfer">—</div><div class="sub" id="vXferSub"></div></div>
+        <div class="kv desk-only"><div class="k">Cycles today</div><div class="v mono" id="vCycles">—</div><div class="sub" id="vCyclesSub"></div></div>
+      </div>
+    </section>
+  </div>
+</div>
+</div>
+
+<div id="page-trends" class="page" hidden>
+<div class="wrap">
+  <section class="panel">
+    <div class="panel-body">
+      <div class="trend-controls">
+        <div class="seg" id="trendPresets">
+          <button type="button" data-hours="2" class="on">2 h</button>
+          <button type="button" data-hours="8">8 h</button>
+          <button type="button" data-hours="24">24 h</button>
+        </div>
+        <details class="trend-goto">
+          <summary>Go to…</summary>
+          <div class="row-line">
+            <input type="date" id="trendDate" aria-label="Date">
+            <input type="time" id="trendTime" aria-label="Start time" value="00:00">
+            <select id="trendLen" aria-label="Length"><option value="2">2 h</option><option value="8">8 h</option><option value="24">24 h</option></select>
+            <button type="button" class="secondary" id="trendGo">Show</button>
+          </div>
+        </details>
+        <span class="small" id="trendStatus"></span>
+        <button type="button" class="secondary" id="trendCancel" hidden>Cancel</button>
+      </div>
+      <p class="muted small" id="trendViewerNote" hidden>Showing data since this page opened. Sign in as operator to load history.</p>
+      <div class="trend-readout mono small" id="trendReadout">&nbsp;</div>
+      <div id="trendStrips"></div>
+      <p class="muted small" style="margin:6px 0 0">Shaded band = lowest to highest value inside each point. ▲ red = alarm, gray tick = setpoint or input change.</p>
+    </div>
+  </section>
+</div>
+</div>
+
+<div id="page-setpoints" class="page" hidden>
+<div class="wrap">
+  <div class="seg sp-views" id="spViewTabs" role="tablist">
+    <button type="button" data-view="process" class="on">Process setpoints</button>
+    <button type="button" data-view="cal">Instrument calibration</button>
+  </div>
+  <div id="spProcessView">
+  <section class="panel">
+    <div class="panel-body row-line" style="margin:0">
+      <button type="button" class="secondary" id="spRefreshBtn">Reload values</button>
+      <span class="muted small" id="spRefreshStatus"></span>
+    </div>
+  </section>
+  <div id="spGroups"></div>
+  <div class="review-bar" id="reviewBar" hidden>
+    <span id="reviewCount"></span>
+    <button type="button" class="secondary" id="spDiscard">Discard</button>
+    <button type="button" class="primary" id="spReview">Review changes</button>
+  </div>
+  </div>
+  <div id="spCalView" hidden><p class="muted small" id="calViewerNote">Sign in as operator to calibrate.</p><div id="calCards"></div></div>
+</div>
+</div>
+<div id="page-alarms" class="page" hidden>
+<div class="wrap">
+  <section class="panel">
+    <div class="panel-body">
+      <h2 class="sec">Active alarms <span id="alarmCountsHeader" class="small muted" style="margin-left:8px;font-weight:normal"></span></h2>
+      <div class="actions">
+        <button type="button" class="action" id="stop-btn">Stop</button>
+        <button type="button" class="action" id="resume-btn">Resume</button>
+        <button type="button" class="action" id="clear-fault-btn">Clear fault</button>
+        <span id="alarm-action-result" class="small"></span>
+      </div>
+      <p class="muted small" id="alarmReadOnly" hidden style="margin:-4px 0 10px">Read-only: sign in as operator to stop, resume, or clear faults.</p>
+      <div id="active-alarms-list"><p class="muted">No active alarms.</p></div>
+    </div>
+  </section>
+  <section class="panel">
+    <div class="panel-body">
+      <h2 class="sec">History</h2>
+      <div class="trend-controls">
+        <button type="button" class="secondary" id="ahLast24">Last 24 h</button>
+        <input type="date" id="ahDate" aria-label="Day">
+        <button type="button" class="secondary" id="ahGo">Show day</button>
+        <label class="small"><input type="checkbox" id="ahShowChanges"> Show setpoint and mode changes</label>
+        <span class="small" id="ahStatus"></span>
+      </div>
+      <p class="muted small" id="ahViewerNote" hidden>Showing alarms since this page opened. Sign in as operator to load stored history.</p>
+      <ul id="alarms-history-list" class="history"></ul>
+    </div>
+  </section>
+</div>
+</div>
+<div id="page-system" class="page" hidden>
+<div class="wrap">
+  <section class="panel">
+    <div class="panel-body row-line" style="margin:0">
+      <span id="signedInAs" class="small"></span>
+      <button type="button" class="secondary" id="signOutBtn" style="margin-left:auto">Sign out</button>
+      <p class="muted small" id="sysReadOnly" hidden style="margin:0;flex-basis:100%">Read-only: sign in as operator to change transports, dosing mode, reboot, email or simulation.</p>
+    </div>
+  </section>
+  <section class="panel">
+    <div class="panel-body">
+      <p style="font-weight:600;margin:0 0 8px">Firmware and last restart</p>
+      <div id="bootInfo" class="small muted">Waiting for the PLC's boot report (firmware 2026-09-24-v6 or newer).</div>
+    </div>
+  </section>
+  <section class="panel">
+    <div class="panel-body">
+      <p style="font-weight:600;margin:0 0 8px">Transport status</p>
+      <div id="transportStatus" class="mono" style="font-size:13px"></div>
+      <div id="sdStatus" class="mono" style="font-size:13px" hidden></div>
+      <div id="loopStatus" class="mono" style="font-size:13px" hidden></div>
+      <p style="font-weight:600;margin:14px 0 4px">Transport toggles</p>
+      <p class="note" style="color:var(--warning);font-size:12px;margin:0 0 10px">
+        Disabling every transport (or the one currently connected with no working
+        alternative) strands the device until power-cycled. Toggle one at a time and
+        confirm the device is still reachable before touching another.
+      </p>
+      <div id="transportToggles" style="display:flex;gap:16px;flex-wrap:wrap"></div>
+      <p class="small" id="transportResult" style="margin:8px 0 0"></p>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-body">
+      <p style="font-weight:600;margin:0 0 8px">Dosing mode</p>
+      <div id="dosingModeControl"></div>
+      <p class="small" id="dosingModeResult" style="margin:8px 0 0"></p>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-body">
+      <p style="font-weight:600;margin:0 0 8px">Reboot</p>
+      <button type="button" class="action" id="rebootBtn">Reboot PLC</button>
+      <span id="rebootResult" style="margin-left:10px;font-size:12px"></span>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-body">
+      <p style="font-weight:600;margin:0 0 8px">Email</p>
+      <div class="row-line">
+        <label for="mailRecipient" style="font-size:13px;min-width:160px">Daily digest recipient</label>
+        <input id="mailRecipient" type="email" style="flex:1;max-width:300px">
+        <button type="button" class="primary" data-mail-slot="recipient">Set</button>
+        <span id="mailResult-recipient" style="font-size:12px"></span>
+      </div>
+      <div id="mailAlertSlots"></div>
+      <div class="row-line" style="margin-top:10px">
+        <label for="emailReqDate">Day to send</label>
+        <input type="date" id="emailReqDate" aria-describedby="emailReqHint">
+        <span class="muted small" id="emailReqHint">Leave empty for yesterday.</span>
+      </div>
+      <button type="button" class="action" id="sendDailyEmailNowBtn" style="margin-top:10px">Send Daily Email Now</button>
+      <span id="sendDailyEmailResult" style="margin-left:10px;font-size:12px"></span>
+    </div>
+  </section>
+
+  <section class="panel" id="simPanel">
+    <div class="panel-body">
+      <h2 class="sec">Simulation</h2>
+      <p class="muted small" style="margin-top:-4px">A simulated value replaces the real reading everywhere in the PLC (control logic, alarms and logs) until you stop it. Simulated values show in magenta with a SIM tag on every page. Q_Stop and the overload trips can never be simulated.</p>
+      <div id="simRows"></div>
+      <p class="small" id="simResult" style="margin:8px 0 0"></p>
+    </div>
+  </section>
+</div>
+</div>
+
+<script>
+(function(){
+  var DEVICE_ID = "plc-38ar-01";
+  var DEFAULT_HOST = "c1866c89.ala.eu-central-1.emqxsl.com"; // EMQX Serverless (2026-10)
+  var DEFAULT_PORT = "8084";
+  var OPERATOR_USERNAME = "SS2-operator"; // matches whichever username orir provisions as the write-capable credential on the broker - update here if it differs
+  var TOPIC_TELEMETRY = "plc/" + DEVICE_ID + "/telemetry";
+  var TOPIC_ALERTS = "plc/" + DEVICE_ID + "/alerts";
+  var TOPIC_BOOT = "plc/" + DEVICE_ID + "/boot"; // retained, one per PLC boot (firmware v6+)
+  var TOPIC_DASH_CMD = "plc/" + DEVICE_ID + "/dash/cmd";
+  var TOPIC_DASH_STATUS = "plc/" + DEVICE_ID + "/dash/status";
+  var TOPIC_DASH_HIST = "plc/" + DEVICE_ID + "/dash/hist";
+  var TOPIC_DEBUG = "plc/" + DEVICE_ID + "/debug";
+  // The PLC publishes telemetry only while this heartbeat keeps arriving
+  // (firmware v29+, telemetry_gate.h) - its window is 75 s, so 30 s here
+  // survives one lost heartbeat.
+  var TOPIC_WATCH = "plc/" + DEVICE_ID + "/watch";
+  var WATCH_EVERY_MS = 30000;
+  var STORE_KEY = "plchmi.plc-38ar-01.login";
+  var PAGES = ["overview", "trends", "setpoints", "alarms", "system"];
+
+  var client = null;
+  var isOperator = false;
+  var lastSeenAt = null;
+  var pendingRequests = {};
+  var watchTimer = null, watchSentAt = null;
+  var hiddenSince = document.hidden ? Date.now() : null, lastInputAt = Date.now();
+  var paused = false;
+  window.__hmiLastTelemetry = null;
+  window.hmiIsOperator = function(){ return isOperator; };
+
+  function $(id){ return document.getElementById(id); }
+  var els = {
+    statusPill: $("statusPill"), statusText: $("statusText"), lastSeen: $("lastSeen"),
+    faultBtn: $("faultBtn"), alertBtn: $("alertBtn"), alarmBtn: $("alarmBtn"), simStrip: $("simStrip"), signin: $("signin"),
+    connForm: $("connForm"), connectBtn: $("connectBtn"), connError: $("connError"),
+    fUser: $("fUser"), fPass: $("fPass"), fHost: $("fHost"), fPort: $("fPort"),
+    signedInAs: $("signedInAs"), signOutBtn: $("signOutBtn"),
+    confirmDialog: $("confirmDialog"), confirmText: $("confirmText"),
+    confirmOk: $("confirmOk"), confirmCancel: $("confirmCancel")
+  };
+
+  function setStatus(kind, text){ els.statusPill.className = "pill " + kind; els.statusText.textContent = text; }
+
+  function renderLiveData(){
+    var st = HmiLogic.liveDataState({ lastSeenAt: lastSeenAt, watchSentAt: watchSentAt, now: Date.now(),
+                                      connected: !!(client && client.connected),
+                                      // ?demo has no broker: banner only with &stale (design review)
+                                      paused: paused || (window.__hmiDemo && !/[?&]stale\b/.test(location.search)) });
+    document.body.classList.toggle("data-stale", st.stale);
+    var strip = $("staleStrip");
+    strip.hidden = !st.stale;
+    if (!st.stale) return;
+    var at = new Date(lastSeenAt), secs = Math.round((Date.now() - lastSeenAt) / 1000);
+    var hhmmss = ("0" + at.getHours()).slice(-2) + ":" + ("0" + at.getMinutes()).slice(-2) + ":" + ("0" + at.getSeconds()).slice(-2);
+    strip.innerHTML = "NO LIVE DATA — values shown are frozen since " + hhmmss + " (" + secs + " s ago)" +
+      "<small>" + (st.reason === "connection" ? "Connection to the cloud broker lost - reconnecting." :
+                                                "The PLC is not sending telemetry - it may be offline.") +
+      " Do not rely on this page until the bar disappears.</small>";
+  }
+
+  function checkFreshness(){
+    renderLiveData();
+    if(client && client.connected && HmiLogic.plcNotAnswering(watchSentAt, lastSeenAt, Date.now())){
+      setStatus("stale", "PLC not answering");
+    }
+    if(!lastSeenAt){ els.lastSeen.textContent = "No telemetry received yet"; return; }
+    var secs = Math.round((Date.now() - lastSeenAt) / 1000);
+    els.lastSeen.textContent = "Last telemetry " + secs + " s ago";
+    if(!client || !client.connected) return;
+    var stale = secs * 1000 >= HmiLogic.LIVE_STALE_MS;
+    setStatus(stale ? "stale" : "live", stale ? "Telemetry stale" : "Live");
+  }
+
+  window.hmiShowPage = function(name){
+    els.signin.hidden = true;
+    PAGES.forEach(function(p){ $("page-" + p).hidden = (p !== name); });
+    document.querySelectorAll("#dash-nav button").forEach(function(b){
+      b.classList.toggle("active", b.dataset.page === name);
+    });
+    document.dispatchEvent(new CustomEvent("hmi:page", { detail: name }));
+  };
+
+  function currentPage(){
+    for (var i = 0; i < PAGES.length; i++) if (!$("page-" + PAGES[i]).hidden) return PAGES[i];
+    return null;
+  }
+
+  function showSignin(){
+    PAGES.forEach(function(p){ $("page-" + p).hidden = true; });
+    els.signin.hidden = false;
+  }
+
+  // Modal confirm for every process-affecting action (ISA-101: multiple
+  // input actions, never single-click).
+  window.hmiConfirm = function(message, okLabel){
+    return new Promise(function(resolve){
+      var d = els.confirmDialog;
+      els.confirmText.textContent = message;
+      els.confirmOk.textContent = okLabel || "Confirm";
+      function done(v){
+        els.confirmOk.onclick = null; els.confirmCancel.onclick = null; d.oncancel = null;
+        if (d.open) d.close();
+        resolve(v);
+      }
+      els.confirmOk.onclick = function(){ done(true); };
+      els.confirmCancel.onclick = function(){ done(false); };
+      d.oncancel = function(e){ e.preventDefault(); done(false); };
+      d.showModal();
+    });
+  };
+
+  function updateMainSwitch(status){
+    var on = status && status.on, known = status && status.known;
+    ["hdrSwitchPill", "mainSwitchBadge"].forEach(function(id){
+      var el = $(id);
+      if (!el) return;
+      el.classList.toggle("on", known && on);
+      el.classList.toggle("off", known && !on);
+    });
+    ["hdrSwitchText", "mainSwitchText"].forEach(function(id){
+      var el = $(id);
+      if (el) el.textContent = known ? (on ? "Main switch: ON" : "Main switch: OFF") : "Main switch: —";
+    });
+    var vEl = $("vMainSwitch");
+    if (vEl) {
+      vEl.textContent = known ? (on ? "ON" : "OFF") : "—";
+      vEl.style.color = known ? (on ? "var(--accent)" : "var(--critical)") : "";
+    }
+  }
+
+  function renderHeader(t){
+    var s = HmiLogic.alarmSummary(t.FaultBitmask);
+    if (els.faultBtn) {
+      els.faultBtn.textContent = (s.faultCount ? "■ " : "") + s.faultText;
+      els.faultBtn.classList.toggle("active", s.faultCount > 0);
+    }
+    if (els.alertBtn) {
+      els.alertBtn.textContent = (s.alertCount ? "▲ " : "") + s.alertText;
+      els.alertBtn.classList.toggle("active", s.alertCount > 0);
+    }
+    if (els.alarmBtn) {
+      els.alarmBtn.textContent = (s.count ? "▲ " : "") + s.text;
+      els.alarmBtn.classList.toggle("active", s.count > 0);
+    }
+    var sims = HmiLogic.simPointsFromMask(t.Sim_Mask || 0);
+    els.simStrip.hidden = sims.length === 0;
+    if (sims.length) els.simStrip.textContent = "SIMULATION ACTIVE: " + sims.join(", ") + "  → Simulation panel";
+    document.querySelectorAll("[data-sim-point]").forEach(function(el){
+      el.classList.toggle("is-sim", sims.indexOf(el.getAttribute("data-sim-point")) >= 0);
+    });
+    updateMainSwitch(HmiLogic.mainSwitchStatus(t));
+  }
+
+  function applyTelemetry(json){
+    lastSeenAt = Date.now();
+    window.__hmiLastTelemetry = json;
+    renderHeader(json);
+    document.dispatchEvent(new CustomEvent("hmi:telemetry", { detail: json }));
+    checkFreshness();
+  }
+
+  function addAlert(message){
+    document.dispatchEvent(new CustomEvent("hmi:alert", { detail: message }));
+  }
+
+  function saveLogin(login){ try{ localStorage.setItem(STORE_KEY, JSON.stringify(login)); }catch(e){} }
+  function loadLogin(){ try{ var r = localStorage.getItem(STORE_KEY); return r ? JSON.parse(r) : null; }catch(e){ return null; } }
+
+  window.sendDashCommand = function(action, extra, onResult){
+    if (!isOperator) { onResult({ id: null, ok: false, error: "not_operator" }); return null; }
+    if (!client || !client.connected) { onResult({ id: null, ok: false, error: "dash_not_connected" }); return null; }
+    var id = Date.now() + "-" + Math.random().toString(16).slice(2);
+    var payload = Object.assign({ id: id, action: action }, extra || {});
+    pendingRequests[id] = onResult;
+    client.publish(TOPIC_DASH_CMD, JSON.stringify(payload));
+    setTimeout(function(){
+      if (pendingRequests[id]) { pendingRequests[id]({ id: id, ok: false, error: "timeout" }); delete pendingRequests[id]; }
+    }, 8000);
+    return id;
+  };
+  window.readPoints = function(points, onResult){ window.sendDashCommand("read", { points: points }, onResult); };
+  window.sendDashBatchWrite = function(writes, onResult){ window.sendDashCommand("write", { writes: writes }, onResult); };
+  window.hmiCanLoadHistory = function(){ return isOperator || window.__hmiDemo; };
+  // Returns the request id (null if it couldn't be sent; onResult then already has the error).
+  window.hmiRequestHistory = function(extra, onResult){
+    if (window.__hmiDemo) {
+      var id = "demo-" + Date.now();
+      setTimeout(function(){ onResult({ id: id, ok: true }); }, 0);
+      HmiLogic.demoHistoryChunks(id, extra.from, extra.to, extra.series).forEach(function(c, i){
+        setTimeout(function(){ document.dispatchEvent(new CustomEvent("hmi:hist", { detail: c })); }, 40 * (i + 1));
+      });
+      return id;
+    }
+    return window.sendDashCommand("history", extra, onResult);
+  };
+
+  function stopWatch(){
+    if (watchTimer) { clearInterval(watchTimer); watchTimer = null; }
+    watchSentAt = null;
+  }
+  function startWatch(){
+    stopWatch();
+    function beat(){ if (client && client.connected) client.publish(TOPIC_WATCH, "1"); }
+    beat();
+    watchSentAt = Date.now();
+    watchTimer = setInterval(beat, WATCH_EVERY_MS);
+  }
+
+  // Free-tier broker budget: a hidden or untouched tab disconnects, so the
+  // PLC stops sending telemetry nobody is looking at.
+  function pause(reason){
+    paused = true;
+    stopWatch();
+    if (client) { client.end(true); client = null; }
+    $("pauseText").textContent = reason === "hidden"
+      ? "Paused to save data while this tab was in the background."
+      : "Paused to save data after 15 minutes without activity.";
+    setStatus("", "Paused");
+    var d = $("pauseDialog");
+    if (!d.open) d.showModal();
+  }
+  function resume(){
+    var d = $("pauseDialog");
+    if (d.open) d.close();
+    if (!paused) return;
+    paused = false;
+    lastInputAt = Date.now();
+    var saved = loadLogin();
+    if (saved && saved.user) connect(saved); else showSignin();
+  }
+  $("pauseResume").addEventListener("click", resume);
+  $("pauseDialog").addEventListener("cancel", function(e){ e.preventDefault(); resume(); });
+  function checkPause(){
+    if (paused || !client || window.__hmiDemo) return;
+    var busy = (window.hmiTrendsBusy && window.hmiTrendsBusy()) || els.confirmDialog.open;
+    var now = Date.now();
+    var reason = HmiLogic.hmiPauseReason({
+      hiddenForMs: hiddenSince == null ? null : now - hiddenSince,
+      idleForMs: now - lastInputAt, busy: busy
+    });
+    if (reason) pause(reason);
+  }
+  ["pointerdown", "keydown", "wheel", "touchstart"].forEach(function(ev){
+    document.addEventListener(ev, function(){ lastInputAt = Date.now(); }, { passive: true, capture: true });
+  });
+  document.addEventListener("visibilitychange", function(){
+    hiddenSince = document.hidden ? Date.now() : null;
+    if (!document.hidden) lastInputAt = Date.now(); // coming back counts as activity
+  });
+
+  function connect(login){
+    els.connError.classList.remove("show");
+    els.connectBtn.disabled = true; els.connectBtn.textContent = "Signing in…";
+    setStatus("", "Connecting…");
+    isOperator = (login.user === OPERATOR_USERNAME);
+    var url = "wss://" + (login.host || DEFAULT_HOST) + ":" + (login.port || DEFAULT_PORT) + "/mqtt";
+    try{
+      client = mqtt.connect(url, {
+        username: login.user, password: login.pass,
+        clientId: "plchmi-" + Math.random().toString(16).slice(2,10),
+        reconnectPeriod: 4000, connectTimeout: 8000, clean: true,
+        queueQoSZero: false, // dropping a publish made while offline is correct - see the original dashboard's reasoning on this exact setting
+      });
+    } catch(err){
+      els.connError.textContent = "Could not open connection: " + err.message;
+      els.connError.classList.add("show"); els.connectBtn.disabled = false; els.connectBtn.textContent = "Sign in";
+      setStatus("down", "Connection failed"); showSignin(); return;
+    }
+    client.on("connect", function(){
+      els.connectBtn.disabled = false; els.connectBtn.textContent = "Sign in";
+      setStatus("", "Waiting for telemetry");
+      els.signedInAs.textContent = "Signed in as " + login.user + (isOperator ? " (operator)" : " (viewer, read-only)");
+      var topics = [TOPIC_TELEMETRY, TOPIC_ALERTS, TOPIC_BOOT];
+      if (isOperator) topics.push(TOPIC_DASH_STATUS, TOPIC_DASH_HIST, TOPIC_DEBUG);
+      client.subscribe(topics, function(err){
+        if(err){ els.connError.textContent = "Connected, but subscribe failed: " + err.message; els.connError.classList.add("show"); }
+        startWatch(); // after subscribing, so the PLC's immediate reply isn't missed
+        // Once subscribed (so dash replies can arrive): show Overview after a
+        // fresh sign-in, otherwise re-announce the page already on screen so
+        // its operator reads run now - covers a reload with a saved login
+        // (the page was shown before connect()) and every reconnect.
+        if (!els.signin.hidden) window.hmiShowPage("overview");
+        else { var cur = currentPage(); if (cur) window.hmiShowPage(cur); }
+      });
+    });
+    client.on("message", function(topic, payload){
+      var text = payload.toString();
+      if(topic === TOPIC_TELEMETRY){ try{ applyTelemetry(JSON.parse(text)); }catch(e){} }
+      else if(topic === TOPIC_ALERTS){ addAlert(text); }
+      else if(topic === TOPIC_BOOT){
+        try{ window.__hmiLastBoot = JSON.parse(text); }catch(e){ return; }
+        document.dispatchEvent(new CustomEvent("hmi:boot", { detail: window.__hmiLastBoot }));
+      }
+      else if(topic === TOPIC_DEBUG){
+        document.dispatchEvent(new CustomEvent("hmi:debug", { detail: text }));
+      }
+      else if(topic === TOPIC_DASH_HIST){
+        var chunk; try{ chunk = JSON.parse(text); }catch(e){ return; }
+        document.dispatchEvent(new CustomEvent("hmi:hist", { detail: chunk }));
+      }
+      else if(topic === TOPIC_DASH_STATUS){
+        var resp; try{ resp = JSON.parse(text); }catch(e){ return; }
+        var handler = pendingRequests[resp.id];
+        if (handler) { handler(resp); delete pendingRequests[resp.id]; }
+      }
+    });
+    client.on("reconnect", function(){ setStatus("stale", "Reconnecting…"); });
+    client.on("close", function(){
+      stopWatch();
+      renderLiveData();
+      if(els.statusText.textContent !== "Not connected" && !paused) setStatus("down", "Disconnected");
+    });
+    client.on("error", function(err){
+      els.connError.textContent = "Broker error: " + (err && err.message ? err.message : String(err));
+      els.connError.classList.add("show"); setStatus("down", "Connection error");
+      els.connectBtn.disabled = false; els.connectBtn.textContent = "Sign in";
+      showSignin();
+    });
+  }
+
+  window.hmiSignOut = function(){
+    try{ localStorage.removeItem(STORE_KEY); }catch(e){}
+    stopWatch(); paused = false;
+    if ($("pauseDialog").open) $("pauseDialog").close();
+    if (client) { client.end(true); client = null; }
+    isOperator = false;
+    Object.keys(pendingRequests).forEach(function(id){ delete pendingRequests[id]; });
+    // Forget the previous session's data; each page script clears its own
+    // caches on hmi:signout.
+    window.__hmiLastTelemetry = null;
+    lastSeenAt = null;
+    els.signedInAs.textContent = "";
+    renderHeader({});
+    document.dispatchEvent(new CustomEvent("hmi:signout"));
+    checkFreshness();
+    setStatus("", "Not connected");
+    els.fPass.value = "";
+    showSignin();
+  };
+
+  els.connForm.addEventListener("submit", function(e){
+    e.preventDefault();
+    var login = {
+      user: els.fUser.value.trim(), pass: els.fPass.value,
+      host: els.fHost.value.trim() || DEFAULT_HOST, port: els.fPort.value.trim() || DEFAULT_PORT
+    };
+    saveLogin(login);
+    if(client){ client.end(true); client = null; }
+    connect(login);
+  });
+  els.signOutBtn.addEventListener("click", window.hmiSignOut);
+
+  document.querySelectorAll("#dash-nav button").forEach(function(btn){
+    btn.addEventListener("click", function(){ window.hmiShowPage(btn.dataset.page); });
+  });
+  if (els.faultBtn) els.faultBtn.addEventListener("click", function(){ window.hmiShowPage("alarms"); });
+  if (els.alertBtn) els.alertBtn.addEventListener("click", function(){ window.hmiShowPage("alarms"); });
+  if (els.alarmBtn) els.alarmBtn.addEventListener("click", function(){ window.hmiShowPage("alarms"); });
+  els.simStrip.addEventListener("click", function(){
+    window.hmiShowPage("system");
+    var panel = $("simPanel");
+    if (panel) panel.scrollIntoView({ behavior: "smooth", block: "start" });
+  });
+
+  setInterval(function(){ checkFreshness(); checkPause(); }, 5000);
+
+  // ?demo=<frame>: render a canned telemetry frame without a broker, for
+  // screenshots and design review (frames in hmi-logic.js DEMO_FRAMES).
+  var demo = new URLSearchParams(location.search).get("demo");
+  window.__hmiDemo = !!(demo && HmiLogic.DEMO_FRAMES && HmiLogic.DEMO_FRAMES[demo]);
+  var saved = HmiLogic.migrateSavedLogin(loadLogin(), DEFAULT_HOST, DEFAULT_PORT);
+  if (saved) saveLogin(saved);
+  els.fHost.value = (saved && saved.host) || DEFAULT_HOST;
+  els.fPort.value = (saved && saved.port) || DEFAULT_PORT;
+  if (demo && HmiLogic.DEMO_FRAMES && HmiLogic.DEMO_FRAMES[demo]) {
+    // Deferred to DOMContentLoaded so every page script below has registered
+    // its listeners (a setTimeout(0) could fire before the parser reached
+    // the last script, leaving e.g. the Simulation panel unrendered).
+    document.addEventListener("DOMContentLoaded", function(){
+      window.hmiShowPage(new URLSearchParams(location.search).get("page") || "overview");
+      applyTelemetry(HmiLogic.DEMO_FRAMES[demo]);
+    });
+  } else if (saved && saved.user) {
+    els.fUser.value = saved.user; els.fPass.value = saved.pass || "";
+    document.addEventListener("DOMContentLoaded", function(){
+      window.hmiShowPage("overview");
+      connect(saved); // on connect the current page is re-announced (F3)
+    });
+  } else {
+    showSignin();
+  }
+})();
+</script>
+<script>
+(function(){
+  var levelFullScaleCm = 160; // SP_L3 default; replaced by the operator bulk read
+  var coils = {};             // P*_ON / P*_Mode / B14 from the operator bulk read
+  var PUMPS = ["P1", "P2", "P3", "P4", "DP1"];
+  var rings = {
+    LT01: HmiLogic.createRing(1440), LT02: HmiLogic.createRing(1440),
+    NO3: HmiLogic.createRing(1440), FLOW: HmiLogic.createRing(1440)
+  };
+
+  function $(id){ return document.getElementById(id); }
+  function setText(id, text){ $(id).textContent = text; }
+  function setHtml(id, html){ var el = $(id); if (el) el.innerHTML = html; }
+  function setBar(id, cm){
+    var h = Math.max(0, Math.min(196, (cm / levelFullScaleCm) * 196));
+    $(id).setAttribute("y", 278 - h);
+    $(id).setAttribute("height", h);
+  }
+  // Inlet totalizer set (2026-10-06): match the PLC's total to FT101's
+  // local display. The PLC applies it as an offset; cycle records are unaffected.
+  var lastInletTotalL = null;
+  function closeInletSet(){ $("inletSetRow").hidden = true; $("inletSetBtn").hidden = false; }
+  $("inletSetBtn").addEventListener("click", function(){
+    $("inletSetInput").value = lastInletTotalL === null ? "" : (lastInletTotalL / 1000).toFixed(3);
+    $("inletSetResult").textContent = "";
+    $("inletSetBtn").hidden = true; $("inletSetRow").hidden = false; $("inletSetInput").focus();
+  });
+  $("inletSetCancel").addEventListener("click", closeInletSet);
+  $("inletSetApply").addEventListener("click", function(){
+    var m3 = parseFloat($("inletSetInput").value);
+    if (!isFinite(m3) || m3 < 0 || m3 > 99999.999) { $("inletSetResult").textContent = "Enter 0 – 99999.999 m³."; return; }
+    var litres = Math.round(m3 * 1000);
+    var cur = lastInletTotalL === null ? "—" : (lastInletTotalL / 1000).toFixed(3);
+    window.hmiConfirm("Set inlet total from " + cur + " m³ to " + (litres / 1000).toFixed(3) + " m³?", "Set total").then(function(ok){
+      if (!ok) return;
+      $("inletSetResult").textContent = "Sending…";
+      window.sendDashCommand("set_inlet_total", { litres: litres }, function(resp){
+        $("inletSetResult").textContent = resp.ok ? "Set to " + (resp.litres / 1000).toFixed(3) + " m³." : ("Failed: " + resp.error);
+        if (resp.ok) closeInletSet();
+      });
+    });
+  });
+
+  function drawSpark(pathId, ring){ $(pathId).setAttribute("d", HmiLogic.sparklinePath(ring.values(), 200, 26)); }
+
+  // Lines that go dark while their pump runs. The feed branches stay dashed:
+  // T-1/T-2 is a manual valve choice the PLC can't see.
+  var PUMP_PIPES = { P1: ["pipeP1"], P2: ["pipeP2"], P3: ["pipeCirc"], DP1: ["pipeDose"],
+                     P4: ["pipeFeed", "pipeFeedT1", "pipeFeedT2"] };
+  function renderPumps(t){
+    PUMPS.forEach(function(p){
+      var s = HmiLogic.pumpState(p, t, coils);
+      PUMP_PIPES[p].forEach(function(id){ $(id).classList.toggle("active", s.running); });
+      var g = $("eq" + p);
+      g.classList.toggle("running", s.running);
+      g.classList.toggle("fault", s.fault);
+      g.querySelector(".badge-mode").style.display = s.manual === true ? "inline" : "none"; // null = unknown: no badge
+      g.querySelector(".badge-fault").style.display = s.fault ? "inline" : "none";
+      g.setAttribute("aria-label", "Pump " + p + (s.running ? ", running" : ", stopped") +
+                     (s.manual === true ? ", manual" : s.manual === null ? ", mode unknown" : "") + (s.fault ? ", fault" : ""));
+    });
+  }
+
+  function render(t){
+    if (typeof t.LT01 === "number") {
+      setBar("mimicLT01Bar", t.LT01); setText("mimicLT01Value", t.LT01 + " cm"); setText("vLt01", t.LT01 + " cm");
+      rings.LT01.push(t.LT01); drawSpark("sparkLt01", rings.LT01);
+    }
+    if (typeof t.LT02 === "number") {
+      setBar("mimicLT02Bar", t.LT02); setText("mimicLT02Value", t.LT02 + " cm"); setText("vLt02", t.LT02 + " cm");
+      rings.LT02.push(t.LT02); drawSpark("sparkLt02", rings.LT02);
+    }
+    if (typeof t.AIT01_NO3 === "number") {
+      var no3 = HmiLogic.scaleTelemetryValue("AIT01_NO3", t.AIT01_NO3);
+      setText("vNo3", no3.toFixed(1) + " ppm"); setText("mimicNo3", no3.toFixed(1)); rings.NO3.push(no3); drawSpark("sparkNo3", rings.NO3);
+    }
+    if (typeof t.NO3_Inlet_Avg === "number") {
+      setText("vNo3Avg", "Hourly average " + HmiLogic.scaleTelemetryValue("NO3_Inlet_Avg", t.NO3_Inlet_Avg).toFixed(1) + " ppm");
+    }
+    if (typeof t.FT101_Flow_Lh === "number") {
+      var flowLh = String(Math.round(t.FT101_Flow_Lh));
+      setText("vFlow", flowLh + " L/h"); setText("mimicFlow", flowLh);
+      rings.FLOW.push(t.FT101_Flow_Lh); drawSpark("sparkFlow", rings.FLOW);
+    }
+    var xfer = HmiLogic.transferRate(t, coils);
+    setText("mimicXferP1", xfer && xfer.pump === "P1" ? xfer.text : "");
+    setText("mimicXferP2", xfer && xfer.pump === "P2" ? xfer.text : "");
+    setText("vXfer", xfer ? xfer.text : "—");
+    setText("vXferSub", xfer ? xfer.pump + " · drain / fill" : "");
+    if (typeof t.Inlet_Total_L === "number") setText("vInletTotal", (t.Inlet_Total_L / 1000).toFixed(3) + " m³");
+    lastInletTotalL = typeof t.Inlet_Total_L === "number" ? t.Inlet_Total_L : null;
+    // Inlet_Ofs_L is only sent by firmware that accepts set_inlet_total (v62+).
+    $("inletSetBtn").hidden = !(window.hmiIsOperator() && typeof t.Inlet_Ofs_L === "number") || !$("inletSetRow").hidden;
+    setText("vStep", HmiLogic.stepLabel(t.Step, t.Cycle_Type === 1));
+    setText("vStepName", typeof t.Step === "number" ? HmiLogic.stepDescription(t.Step) : "");
+    var dosing = HmiLogic.dosingText(t, typeof coils.B14 === "number" ? coils.B14 === 1 : undefined);
+    setText("vDosing", dosing);
+    setText("mimicDosing", typeof t.Dosing_Flow === "number" ? t.Dosing_Flow + " mL/h" : "—");
+    if (typeof t.LS0_low === "number") {
+      var ok = t.LS0_low === 0; // 0 = high (level OK), 1 = low
+      setText("mimicLS0Label", ok ? "Level OK" : "LOW");
+      $("mimicLS0").classList.toggle("fault", !ok);
+    }
+    if (typeof t.C_10 === "number") {
+      setText("vCycles", String(t.C_10));
+      var run = HmiLogic.cycleRunText(t);
+      setText("vCyclesSub", "Large " + t.C_11 + " · Small " + t.C_12 + (run ? " · " + run.charAt(0).toLowerCase() + run.slice(1) : ""));
+    }
+
+    function timerSP(name, fallback){
+      if (typeof coils[name] === "number" && coils[name] > 0) return coils[name];
+      return fallback;
+    }
+
+    function getStepTargetSP(stepData){
+      if (!stepData || typeof stepData.Step !== "number") return null;
+      if (stepData.Step === 106) return { sp: timerSP("T_11", 900), name: "T_11" };
+      if (stepData.Step === 110) return { sp: timerSP("T_12", 900), name: "T_12" };
+      if (stepData.Step === 104) {
+        var halfSP1 = stepData.Cycle_Type === 1 ? timerSP("T_13", 1800) : timerSP("T_14", 1800);
+        var p1 = typeof stepData.t_11 === "number" ? stepData.t_11 : 0;
+        return { sp: Math.max(0, halfSP1 - p1), name: "Delay" };
+      }
+      if (stepData.Step === 108) {
+        var halfSP2 = stepData.Cycle_Type === 1 ? timerSP("T_13", 1800) : timerSP("T_14", 1800);
+        var p2 = typeof stepData.t_12 === "number" ? stepData.t_12 : 0;
+        return { sp: Math.max(0, halfSP2 - p2), name: "Delay" };
+      }
+      if (stepData.Step === 102) return { sp: 3, name: "Hold" };
+      if (stepData.Step === 100) return null;
+      if (timerSP("T_16", 0) > 0) return { sp: timerSP("T_16", 0), name: "T_16" };
+      return null;
+    }
+
+    // Running timers displayed as running / SP (SP in bold)
+    var target = getStepTargetSP(t);
+    var t16Val = typeof t.t_16 === "number" ? t.t_16 : (t.Step === 100 ? 0 : null);
+    var stepTimerHtml = "—";
+    var stepTimerBadgeHtml = "Step: —";
+    if (t16Val !== null) {
+      if (target && target.sp > 0) {
+        stepTimerHtml = '<span class="timer-run">' + t16Val + '</span> / <b class="timer-sp">' + target.sp + '</b> s';
+        stepTimerBadgeHtml = 'Step: <span class="timer-run">' + t16Val + '</span> / <b class="timer-sp">' + target.sp + '</b> s';
+      } else {
+        stepTimerHtml = t16Val + " s";
+        stepTimerBadgeHtml = "Step: " + t16Val + " s";
+      }
+    }
+    setHtml("vStepTimer", stepTimerHtml);
+    setHtml("stepTimerBadgeText", stepTimerBadgeHtml);
+
+    if (typeof t.Step === "number") {
+      if (t.Step === 104 || t.Step === 108) {
+        // The delay SP is calculated, not T_16: half-cycle SP minus the pump's run time.
+        var hcName = t.Cycle_Type === 1 ? "T_13" : "T_14";
+        var runName = t.Step === 104 ? "P1" : "P2";
+        var runVal = t.Step === 104 ? t.t_11 : t.t_12;
+        setHtml("vStepTimerSub", "Delay phase" + (target ? ' (calc: ' + hcName + ' ' + timerSP(hcName, 1800) + ' − ' + runName + ' run ' + (typeof runVal === "number" ? runVal : 0) + ' = <b class="timer-sp">' + target.sp + '</b> s)' : ""));
+      } else if (t.Step === 106) {
+        var sp11 = timerSP("T_11", 900);
+        setHtml("vStepTimerSub", "P1 pumping" + (typeof t.t_11 === "number" ? ' · t_11: <span class="timer-run">' + t.t_11 + '</span> / <b class="timer-sp">' + sp11 + '</b> s' : ""));
+      } else if (t.Step === 110) {
+        var sp12 = timerSP("T_12", 900);
+        setHtml("vStepTimerSub", "P2 pumping" + (typeof t.t_12 === "number" ? ' · t_12: <span class="timer-run">' + t.t_12 + '</span> / <b class="timer-sp">' + sp12 + '</b> s' : ""));
+      } else if (t.Step === 102) {
+        setHtml("vStepTimerSub", "Ready / settling (3 s check)");
+      } else if (t.Step === 100) {
+        setHtml("vStepTimerSub", "Stopped");
+      } else {
+        setHtml("vStepTimerSub", "");
+      }
+    }
+
+    var halfCycleTimer = t.Cycle_Type === 1 ? t.t_13 : t.t_14;
+    var halfCycleSP = t.Cycle_Type === 1 ? timerSP("T_13", 1800) : timerSP("T_14", 1800);
+    if (typeof halfCycleTimer === "number") {
+      setHtml("vCycleTimer", '<span class="timer-run">' + halfCycleTimer + '</span> / <b class="timer-sp">' + halfCycleSP + '</b> s');
+      setHtml("vCycleTimerSub", t.Cycle_Type === 1 ? 'Large half-cycle (SP T_13: <b class="timer-sp">' + halfCycleSP + '</b> s)' : 'Small half-cycle (SP T_14: <b class="timer-sp">' + halfCycleSP + '</b> s)');
+    } else {
+      setHtml("vCycleTimer", '— / <b class="timer-sp">' + halfCycleSP + '</b> s');
+      setHtml("vCycleTimerSub", t.Cycle_Type === 1 ? "Large half-cycle (T_13)" : "Small half-cycle (T_14)");
+    }
+
+    renderPumps(t);
+  }
+
+  window.hmiOverviewCoils = function(){ return coils; };
+  window.hmiSetCoil = function(name, value){
+    coils[name] = value;
+    if (window.__hmiLastTelemetry) render(window.__hmiLastTelemetry);
+  };
+
+  function refreshOverviewReads(){
+    if (!window.hmiIsOperator()) return; // viewer: pump states fall back to the step
+    readPoints(["SP_L3", "P1_ON", "P2_ON", "P3_ON", "P4_ON", "DP1_ON",
+                "P1_Mode", "P2_Mode", "P3_Mode", "P4_Mode", "DP1_Mode", "B14",
+                "T_11", "T_12", "T_13", "T_14", "T_16"], function(resp){
+      if (!resp.ok) return;
+      if (typeof resp.values.SP_L3 === "number" && resp.values.SP_L3 > 0) levelFullScaleCm = resp.values.SP_L3;
+      Object.assign(coils, resp.values);
+      if (window.__hmiLastTelemetry) render(window.__hmiLastTelemetry);
+    });
+  }
+
+  function newRings(){
+    return { LT01: HmiLogic.createRing(1440), LT02: HmiLogic.createRing(1440),
+             NO3: HmiLogic.createRing(1440), FLOW: HmiLogic.createRing(1440) };
+  }
+  // Sign-out: drop the previous session's coils, trends and shown values.
+  function resetOverview(){
+    coils = {};
+    levelFullScaleCm = 160;
+    rings = newRings();
+    ["mimicLT01Value", "mimicLT02Value", "vLt01", "vLt02", "vNo3", "mimicNo3", "vFlow", "mimicFlow", "vStep",
+     "vDosing", "mimicDosing", "mimicLS0Label", "vCycles", "vInletTotal", "vStepTimer", "vCycleTimer", "stepTimerBadgeText", "vXfer"].forEach(function(id){ setText(id, "—"); });
+    ["vNo3Avg", "mimicXferP1", "mimicXferP2", "vXferSub", "inletSetResult", "vStepName", "vCyclesSub", "vStepTimerSub", "vCycleTimerSub"].forEach(function(id){ setText(id, ""); });
+    setBar("mimicLT01Bar", 0); setBar("mimicLT02Bar", 0);
+    ["sparkFlow", "sparkNo3", "sparkLt01", "sparkLt02"].forEach(function(id){ $(id).setAttribute("d", ""); });
+    $("mimicLS0").classList.remove("fault");
+    lastInletTotalL = null; $("inletSetRow").hidden = true; $("inletSetBtn").hidden = true;
+    renderPumps({});
+  }
+
+  var lastTeleAt = 0;
+  var lastT16 = null;
+
+  document.addEventListener("hmi:telemetry", function(e){
+    if (typeof e.detail.t_16 === "number") {
+      lastT16 = e.detail.t_16;
+      lastTeleAt = Date.now();
+    }
+    render(e.detail);
+  });
+
+  setInterval(function(){
+    if (!$("page-overview") || $("page-overview").hidden) return;
+    if (lastT16 === null || lastTeleAt === 0) return;
+    var t = window.__hmiLastTelemetry;
+    if (!t || t.Step === 100) return;
+    var elapsed = Math.floor((Date.now() - lastTeleAt) / 1000);
+    var liveT16 = lastT16 + elapsed;
+    var target = (typeof coils.T_11 === "number" || typeof coils.T_13 === "number") ? (function(){
+      if (t.Step === 106) return { sp: (typeof coils.T_11 === "number" ? coils.T_11 : 900) };
+      if (t.Step === 110) return { sp: (typeof coils.T_12 === "number" ? coils.T_12 : 900) };
+      if (t.Step === 104) {
+        var hsp1 = t.Cycle_Type === 1 ? (typeof coils.T_13 === "number" ? coils.T_13 : 1800) : (typeof coils.T_14 === "number" ? coils.T_14 : 1800);
+        return { sp: Math.max(0, hsp1 - (typeof t.t_11 === "number" ? t.t_11 : 0)) };
+      }
+      if (t.Step === 108) {
+        var hsp2 = t.Cycle_Type === 1 ? (typeof coils.T_13 === "number" ? coils.T_13 : 1800) : (typeof coils.T_14 === "number" ? coils.T_14 : 1800);
+        return { sp: Math.max(0, hsp2 - (typeof t.t_12 === "number" ? t.t_12 : 0)) };
+      }
+      if (t.Step === 102) return { sp: 3 };
+      return null;
+    })() : null;
+    var liveHtml = (target && target.sp > 0) ? ('<span class="timer-run">' + liveT16 + '</span> / <b class="timer-sp">' + target.sp + '</b> s') : (liveT16 + " s");
+    setHtml("vStepTimer", liveHtml);
+    setHtml("stepTimerBadgeText", "Step: " + liveHtml);
+  }, 1000);
+  document.addEventListener("hmi:page", function(e){ if (e.detail === "overview") refreshOverviewReads(); });
+  document.addEventListener("hmi:signout", resetOverview);
+  setInterval(function(){
+    if (!$("page-overview").hidden) refreshOverviewReads();
+  }, 15000);
+})();
+</script>
+<script>
+(function(){
+  var IDLE_MS = 60000; // ISA-101: popups auto-close after inactivity unless pinned
+  var NAMES = { P1: "P1 · TAYA 1 pump", P2: "P2 · TAYA 2 pump", P3: "P3 · sugar mixing pump",
+                P4: "P4 · inlet pump", DP1: "DP1 · dosing pump" };
+  var fp = document.getElementById("faceplate");
+  var current = null, pinned = false, idleTimer = null;
+  function $(id){ return document.getElementById(id); }
+
+  function close(){ fp.hidden = true; current = null; clearTimeout(idleTimer); }
+  function armIdle(){
+    clearTimeout(idleTimer);
+    if (!pinned && current) idleTimer = setTimeout(close, IDLE_MS);
+  }
+
+  function render(){
+    if (!current) return;
+    var t = window.__hmiLastTelemetry || {};
+    var coils = window.hmiOverviewCoils();
+    var s = HmiLogic.pumpState(current, t, coils);
+    var op = window.hmiIsOperator();
+    var isDp = current === "DP1";
+    $("fpTitle").textContent = NAMES[current];
+    $("fpState").textContent = (s.fault ? "Fault · " : "") + (s.running ? "Running" : "Stopped");
+    $("fpState").style.color = s.fault ? "var(--critical)" : "";
+
+    var fpTimerRow = $("fpTimerRow");
+    if (fpTimerRow) {
+      if (current === "P1") {
+        fpTimerRow.hidden = false;
+        var p1T = typeof t.t_11 === "number" ? t.t_11 : 0;
+        var p1SP = (typeof coils.T_11 === "number" && coils.T_11 > 0) ? coils.T_11 : 900;
+        $("fpTimerVal").innerHTML = '<span class="timer-run">' + p1T + '</span> / <b class="timer-sp">' + p1SP + '</b> s';
+      } else if (current === "P2") {
+        fpTimerRow.hidden = false;
+        var p2T = typeof t.t_12 === "number" ? t.t_12 : 0;
+        var p2SP = (typeof coils.T_12 === "number" && coils.T_12 > 0) ? coils.T_12 : 900;
+        $("fpTimerVal").innerHTML = '<span class="timer-run">' + p2T + '</span> / <b class="timer-sp">' + p2SP + '</b> s';
+      } else {
+        fpTimerRow.hidden = true;
+      }
+    }
+
+    $("fpModeRow").hidden = isDp;
+    $("fpDpModeRow").hidden = !isDp;
+
+    if (isDp) {
+      var dpManual = s.manual;
+      var b14 = typeof coils.B14 === "number" ? coils.B14 : null;
+      var activeDpMode = null;
+      if (dpManual === true) activeDpMode = "manual";
+      else if (dpManual === false && b14 === 1) activeDpMode = "auto-no3";
+      else if (dpManual === false && b14 === 0) activeDpMode = "auto-fixed";
+
+      document.querySelectorAll("#fpDpMode button").forEach(function(b){
+        b.classList.toggle("on", activeDpMode !== null && b.dataset.dpmode === activeDpMode);
+        b.disabled = !op;
+      });
+      $("fpDpModeUnknown").hidden = activeDpMode !== null;
+      var rateText = "";
+      if (activeDpMode === "auto-no3") rateText = "Target flow (by NO3): " + (t.Dosing_Flow || 0) + " mL/h (SP_F02)";
+      else if (activeDpMode === "auto-fixed") rateText = "Target flow (fixed): " + (t.Dosing_Flow || 0) + " mL/h (SP_F01)";
+      else if (activeDpMode === "manual") rateText = "Manual flow: " + (t.Dosing_Flow || 0) + " mL/h (SP_F01)";
+      $("fpDpRate").textContent = rateText;
+    } else {
+      document.querySelectorAll("#fpMode button").forEach(function(b){
+        b.classList.toggle("on", s.manual !== null && Number(b.dataset.mode) === (s.manual ? 1 : 0));
+        b.disabled = !op;
+      });
+      $("fpModeUnknown").hidden = s.manual !== null;
+    }
+
+    $("fpManual").hidden = s.manual !== true;
+    $("fpStart").disabled = !op || s.running;
+    $("fpStop").disabled = !op || !s.running;
+    $("fpNote").textContent = op ? "" : "Read-only: sign in as operator to change pumps.";
+  }
+
+  function open(pump){
+    current = pump; pinned = false;
+    $("fpPin").textContent = "Pin";
+    $("fpResult").textContent = "";
+    fp.hidden = false;
+    render();
+    armIdle();
+  }
+
+  function write(point, value, message){
+    // No idle close while the confirm dialog is up - the operator is mid-
+    // decision; closing the popup under them would orphan the confirm.
+    clearTimeout(idleTimer);
+    window.hmiConfirm(message).then(function(ok){
+      armIdle();
+      if (!ok) return;
+      $("fpResult").textContent = "Sending…";
+      sendDashCommand("coil", { point: point, value: value }, function(resp){
+        $("fpResult").textContent = resp.ok ? "Done." : ("Failed: " + resp.error);
+        if (resp.ok) window.hmiSetCoil(point, value);
+        render();
+      });
+    });
+  }
+
+  document.querySelectorAll("#mimicSvg .equip").forEach(function(g){
+    g.addEventListener("click", function(){ open(g.dataset.pump); });
+    g.addEventListener("keydown", function(e){
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(g.dataset.pump); }
+    });
+  });
+  document.querySelectorAll("#fpMode button").forEach(function(b){
+    b.addEventListener("click", function(){
+      var m = Number(b.dataset.mode);
+      write(current + "_Mode", m, "Switch " + current + " to " + (m === 1 ? "Manual" : "Auto") + "?");
+    });
+  });
+  document.querySelectorAll("#fpDpMode button").forEach(function(b){
+    b.addEventListener("click", function(){
+      var modeKey = b.dataset.dpmode;
+      clearTimeout(idleTimer);
+      var msg = "";
+      var writes = [];
+      if (modeKey === "manual") {
+        msg = "Switch DP1 to Manual?";
+        writes = [{ point: "DP1_Mode", value: 1 }];
+      } else if (modeKey === "auto-no3") {
+        msg = "Switch DP1 to Auto (by NO3 meter)?";
+        writes = [{ point: "DP1_Mode", value: 0 }, { point: "B14", value: 1 }];
+      } else if (modeKey === "auto-fixed") {
+        msg = "Switch DP1 to Auto (fixed flow SP_F01)?";
+        writes = [{ point: "DP1_Mode", value: 0 }, { point: "B14", value: 0 }];
+      }
+      window.hmiConfirm(msg).then(function(ok){
+        armIdle();
+        if (!ok) return;
+        $("fpResult").textContent = "Sending…";
+        window.sendDashBatchWrite(writes, function(resp){
+          $("fpResult").textContent = resp.ok ? "Done." : ("Failed: " + resp.error);
+          if (resp.ok) {
+            writes.forEach(function(w){ window.hmiSetCoil(w.point, w.value); });
+          }
+          render();
+        });
+      });
+    });
+  });
+  $("fpStart").addEventListener("click", function(){ write(current + "_ON", 1, "Start " + current + " manually?"); });
+  $("fpStop").addEventListener("click", function(){ write(current + "_ON", 0, "Stop " + current + "?"); });
+  $("fpClose").addEventListener("click", close);
+  $("fpPin").addEventListener("click", function(){
+    pinned = !pinned;
+    $("fpPin").textContent = pinned ? "Unpin" : "Pin";
+    if (pinned) clearTimeout(idleTimer); else armIdle();
+  });
+  fp.addEventListener("pointerdown", armIdle);
+  fp.addEventListener("keydown", armIdle);
+  document.addEventListener("hmi:telemetry", render);
+  document.addEventListener("hmi:page", function(e){ if (e.detail !== "overview") close(); });
+  document.addEventListener("hmi:signout", close);
+})();
+</script>
+<script>
+(function(){
+  var original = {}; // name -> value from the last successful read
+  var edited = {};   // name -> raw input text, touched fields only
+  function $(id){ return document.getElementById(id); }
+
+  var groups = {};
+  HmiLogic.PROCESS_SETPOINTS.forEach(function(sp){ (groups[sp.group] = groups[sp.group] || []).push(sp); });
+  var groupOrder = ["Timers", "Cycles", "Levels", "NO3", "Dosing"];
+  Object.keys(groups).forEach(function(g){ if (groupOrder.indexOf(g) === -1) groupOrder.push(g); });
+  groupOrder.forEach(function(groupName){
+    if (!groups[groupName]) return;
+    var section = document.createElement("section");
+    section.className = "panel";
+    section.innerHTML = '<div class="panel-head"><h2></h2></div><div class="panel-body"></div>';
+    section.querySelector("h2").textContent = groupName;
+    var body = section.querySelector(".panel-body");
+    groups[groupName].forEach(function(sp){
+      var row = document.createElement("div");
+      row.className = "sp-row";
+      row.innerHTML =
+        '<label for="sp-input-' + sp.name + '"><span></span> <span class="mono muted small">' + sp.name + '</span></label>' +
+        '<span class="sp-pv" id="sp-pv-' + sp.name + '" title="Current live value">Current: —</span>' +
+        '<input id="sp-input-' + sp.name + '" type="text" inputmode="numeric" autocomplete="off">' +
+        '<span class="muted small">' + sp.unit + '</span>' +
+        '<div class="err" id="sp-err-' + sp.name + '" hidden></div>';
+      row.querySelector("label span").textContent = sp.label;
+      var input = row.querySelector("input");
+      input.title = "Allowed " + sp.min + "–" + sp.max + " " + sp.unit;
+      input.addEventListener("input", function(){
+        edited[sp.name] = input.value;
+        var v = input.value.trim() === "" ? { ok: true } : HmiLogic.validateNumber(sp, input.value);
+        input.classList.toggle("invalid", !v.ok);
+        input.classList.toggle("changed", v.ok && v.value !== undefined && v.value !== original[sp.name]);
+        $("sp-err-" + sp.name).hidden = v.ok;
+        $("sp-err-" + sp.name).textContent = v.ok ? "" : v.reason;
+        updateReviewBar();
+      });
+      body.appendChild(row);
+    });
+    $("spGroups").appendChild(section);
+  });
+
+  function setInputsEnabled(on){
+    HmiLogic.PROCESS_SETPOINTS.forEach(function(sp){ $("sp-input-" + sp.name).disabled = !on; });
+  }
+
+  function fillInputs(){
+    HmiLogic.PROCESS_SETPOINTS.forEach(function(sp){
+      var input = $("sp-input-" + sp.name);
+      input.value = typeof original[sp.name] === "number" ? String(original[sp.name]) : "";
+      input.classList.remove("changed", "invalid");
+      $("sp-err-" + sp.name).hidden = true;
+    });
+  }
+
+  function updateReviewBar(){
+    var d = HmiLogic.setpointDiff(original, edited);
+    var n = d.changes.length, bad = d.errors.length;
+    $("reviewBar").hidden = n === 0 && bad === 0;
+    $("reviewCount").textContent = n + (n === 1 ? " change" : " changes") + (bad ? " · " + bad + " invalid" : "");
+    $("spReview").disabled = n === 0 || bad > 0;
+  }
+
+  // afterRead(readError) (optional): runs after the read, e.g. to replace
+  // the status line with a write outcome; readError is set if it failed.
+  function refresh(afterRead){
+    if (!window.hmiIsOperator()) {
+      $("spRefreshStatus").textContent = "Read-only: sign in as operator to read and change setpoints.";
+      setInputsEnabled(false);
+      return;
+    }
+    setInputsEnabled(true);
+    $("spRefreshStatus").textContent = "Reading…";
+    readPoints(HmiLogic.PROCESS_SETPOINTS.map(function(s){ return s.name; }), function(resp){
+      if (!resp.ok) {
+        $("spRefreshStatus").textContent = "Read failed: " + resp.error;
+        if (afterRead) afterRead(resp.error);
+        return;
+      }
+      original = resp.values;
+      edited = {};
+      fillInputs();
+      updateReviewBar();
+      $("spRefreshStatus").textContent = "Values read at " + new Date().toTimeString().slice(0, 8);
+      if (afterRead) afterRead();
+    });
+  }
+
+  $("spReview").addEventListener("click", function(){
+    var d = HmiLogic.setpointDiff(original, edited);
+    if (!d.changes.length || d.errors.length) return;
+    var lines = d.changes.map(function(c){
+      return c.label + " (" + c.name + "): " + (c.from === null ? "—" : c.from) + " → " + c.to;
+    });
+    window.hmiConfirm("Apply " + d.changes.length + (d.changes.length === 1 ? " change" : " changes") + "?\n\n" + lines.join("\n"), "Apply").then(function(ok){
+      if (!ok) return;
+      $("spRefreshStatus").textContent = "Writing…";
+      sendDashBatchWrite(d.changes.map(function(c){ return { point: c.name, value: c.to }; }), function(resp){
+        var r = HmiLogic.batchOutcome(resp);
+        if (r.error) { $("spRefreshStatus").textContent = "Write failed, nothing applied: " + r.error; return; }
+        // ok:true can still carry per-point failures: re-read so the page
+        // shows what the PLC actually holds, then name what did not apply.
+        var failedText = r.failed.map(function(f){ return f.point + " (" + f.error + ")"; }).join(", ");
+        refresh(function(readError){
+          var msg = r.applied ? "Saved." : "Partly saved. Not applied: " + failedText + ".";
+          $("spRefreshStatus").textContent = msg + (readError ? " Re-read failed (" + readError + "), press Reload values."
+            : (r.applied ? "" : " Values below are re-read from the PLC."));
+        });
+      });
+    });
+  });
+  $("spDiscard").addEventListener("click", function(){ edited = {}; fillInputs(); updateReviewBar(); });
+  function updateSetpointsLive(t){
+    if (!t) return;
+    HmiLogic.PROCESS_SETPOINTS.forEach(function(sp){
+      var el = $("sp-pv-" + sp.name);
+      if (el) {
+        var coils = window.hmiOverviewCoils ? window.hmiOverviewCoils() : {};
+        var val = HmiLogic.currentValueForSetpoint(sp.name, t, coils);
+        el.textContent = "Current: " + val;
+      }
+    });
+  }
+
+  document.addEventListener("hmi:telemetry", function(e){ updateSetpointsLive(e.detail); });
+
+  $("spRefreshBtn").addEventListener("click", function(){ refresh(); });
+  document.addEventListener("hmi:page", function(e){
+    if (e.detail !== "setpoints") return;
+    if (window.__hmiLastTelemetry) updateSetpointsLive(window.__hmiLastTelemetry);
+    // Returning to the page must not throw away unsaved edits; the
+    // explicit "Reload values" button still re-reads and discards them.
+    if (Object.keys(edited).length && window.hmiIsOperator()) {
+      setInputsEnabled(true);
+      $("spRefreshStatus").textContent = "Unsaved edits kept. Reload values to discard them.";
+      return;
+    }
+    refresh();
+  });
+  document.addEventListener("hmi:signout", function(){
+    original = {}; edited = {};
+    fillInputs();
+    updateReviewBar();
+    $("spRefreshStatus").textContent = "";
+  });
+})();
+</script>
+<script>
+(function(){
+  function $(id){ return document.getElementById(id); }
+  var frames = {};    // tag -> [{adc, mA}] last few telemetry frames
+  var settings = {};  // tag -> {raw4, raw20, eng4, eng20} in register units
+  var points = {};    // tag -> {p1, p2} two-point captures (page only)
+
+  HmiLogic.CAL_INSTRUMENTS.forEach(function(inst){
+    frames[inst.tag] = []; points[inst.tag] = {};
+    var t = inst.tag, u = inst.unit;
+    var card = document.createElement("section");
+    card.className = "panel";
+    card.innerHTML =
+      '<div class="panel-head"><h2></h2></div><div class="panel-body">' +
+      '<p class="cal-live simable-html" data-sim-point="' + t + '" id="cal-live-' + t + '">Raw — · — mA · —</p>' +
+      '<div class="cal-sub">Electrical (ADC counts at 4 mA and 20 mA)</div>' +
+      '<p class="small muted">Type counts directly, or use live reading. If empty/dry (4 mA), click Use current reading on 4 mA, then Calc 20 mA (5×).</p>' +
+      '<div class="cal-row"><label>4 mA count</label><input id="cal-raw4-' + t + '" inputmode="numeric"> counts' +
+        '<button type="button" class="secondary" id="cal-cap4-' + t + '">Use current reading</button></div>' +
+      '<div class="cal-row"><label>20 mA count</label><input id="cal-raw20-' + t + '" inputmode="numeric"> counts' +
+        '<button type="button" class="secondary" id="cal-cap20-' + t + '">Use current reading</button>' +
+        '<button type="button" class="secondary" id="cal-calc20-' + t + '" title="Set 20 mA count to 5 × 4 mA count">Calc 20 mA (5×)</button>' +
+        '<button type="button" class="action" id="cal-elec-' + t + '">Apply electrical</button></div>' +
+      '<div class="cal-sub">Range' + (u === "cm" ? ' (4 mA = height of the sensor\'s zero above the tank bottom)' : '') + '</div>' +
+      '<div class="cal-row"><label>Value at 4 mA</label><input id="cal-e4-' + t + '" inputmode="decimal"> ' + u + '</div>' +
+      '<div class="cal-row"><label>Value at 20 mA</label><input id="cal-e20-' + t + '" inputmode="decimal"> ' + u +
+        '<button type="button" class="action" id="cal-range-' + t + '">Apply range</button></div>' +
+      '<div class="cal-sub">Zero adjust (keeps the span)</div>' +
+      '<div class="cal-row"><label>Actual value now</label><input id="cal-zero-' + t + '" inputmode="decimal"> ' + u +
+        '<button type="button" class="action" id="cal-zeroapply-' + t + '">Apply</button></div>' +
+      '<div class="cal-sub">Two-point</div>' +
+      '<div class="cal-row"><label>Point 1 actual</label><input id="cal-p1-' + t + '" inputmode="decimal"> ' + u +
+        '<button type="button" class="secondary" id="cal-p1cap-' + t + '">Capture</button><span class="small muted" id="cal-p1txt-' + t + '"></span></div>' +
+      '<div class="cal-row"><label>Point 2 actual</label><input id="cal-p2-' + t + '" inputmode="decimal"> ' + u +
+        '<button type="button" class="secondary" id="cal-p2cap-' + t + '">Capture</button><span class="small muted" id="cal-p2txt-' + t + '"></span></div>' +
+      '<div class="cal-row"><button type="button" class="action" id="cal-2apply-' + t + '">Apply two-point</button></div>' +
+      '<p class="cal-result" id="cal-result-' + t + '"></p></div>';
+    card.querySelector("h2").textContent = inst.label;
+    $("calCards").appendChild(card);
+  });
+
+  function inst(tag){ return HmiLogic.CAL_INSTRUMENTS.find(function(i){ return i.tag === tag; }); }
+  function avgMa(tag){ return HmiLogic.averageLast(frames[tag].map(function(f){ return f.mA; }), 3); }
+  function avgAdc(tag){ var a = HmiLogic.averageLast(frames[tag].map(function(f){ return f.adc; }), 3); return a === null ? null : Math.round(a); }
+  function num(id){ var v = parseFloat($(id).value); return isFinite(v) ? v : null; }
+  function result(tag, text, bad){ var el = $("cal-result-" + tag); el.textContent = text; el.style.color = bad ? "var(--critical)" : ""; }
+
+  function renderLive(tag){
+    var i = inst(tag), s = settings[tag], mA = avgMa(tag), adc = avgAdc(tag);
+    var val = s ? HmiLogic.currentValueFromMilliamps(i, mA, s) : null;
+    $("cal-live-" + tag).textContent = "Raw " + (adc === null ? "—" : adc.toLocaleString("en-US")) +
+      " · " + (mA === null ? "— mA" : mA.toFixed(2) + " mA") + " · " +
+      (s && (s.raw20 <= s.raw4) ? "check electrical calibration" : (val === null ? "—" : val.toFixed(i.decimals) + " " + i.unit));
+    var op = window.hmiIsOperator();
+    ["cal-cap4-", "cal-cap20-", "cal-calc20-", "cal-elec-"].forEach(function(p){ $(p + tag).disabled = !op || !s; });
+    ["cal-zeroapply-", "cal-p1cap-", "cal-p2cap-"].forEach(function(p){ $(p + tag).disabled = !op || mA === null || !s; });
+    ["cal-range-", "cal-2apply-"].forEach(function(p){ $(p + tag).disabled = !op || !s; });
+  }
+
+  function fillSettings(tag){
+    var i = inst(tag), s = settings[tag];
+    $("cal-raw4-" + tag).value = s ? String(s.raw4) : "";
+    $("cal-raw20-" + tag).value = s ? String(s.raw20) : "";
+    $("cal-e4-" + tag).value = s ? String(s.eng4 / i.regScale) : "";
+    $("cal-e20-" + tag).value = s ? String(s.eng20 / i.regScale) : "";
+  }
+
+  function readSettings(){
+    if (!window.hmiIsOperator()) return;
+    var names = [];
+    HmiLogic.CAL_INSTRUMENTS.forEach(function(i){ names.push(i.raw4, i.raw20, i.eng4, i.eng20); });
+    readPoints(names, function(resp){
+      if (!resp.ok) { HmiLogic.CAL_INSTRUMENTS.forEach(function(i){ result(i.tag, "Could not read settings: " + resp.error, true); }); return; }
+      HmiLogic.CAL_INSTRUMENTS.forEach(function(i){
+        var v = resp.values;
+        settings[i.tag] = { raw4: v[i.raw4], raw20: v[i.raw20], eng4: v[i.eng4], eng20: v[i.eng20] };
+        fillSettings(i.tag); renderLive(i.tag);
+      });
+    });
+  }
+
+  function write(tag, writes, message){
+    window.hmiConfirm(message, "Apply").then(function(ok){
+      if (!ok) return;
+      result(tag, "Writing…");
+      sendDashBatchWrite(writes, function(resp){
+        var out = HmiLogic.batchOutcome(resp);
+        if (out.applied) result(tag, "Applied.");
+        else result(tag, "Failed: " + (out.error || out.failed.map(function(f){ return f.point + " " + f.error; }).join(", ")), true);
+        readSettings();
+      });
+    });
+  }
+
+  function applyRange(tag, eng4, eng20){
+    var i = inst(tag), v = HmiLogic.validateRange(i, eng4, eng20);
+    if (!v.ok) { result(tag, v.reason, true); return; }
+    write(tag, v.writes, HmiLogic.calibrationConfirmText(i, settings[tag], { eng4: v.writes[0].value / i.regScale, eng20: v.writes[1].value / i.regScale }, avgMa(tag)));
+  }
+
+  HmiLogic.CAL_INSTRUMENTS.forEach(function(i){
+    var t = i.tag;
+    $("cal-cap4-" + t).addEventListener("click", function(){
+      var raw = avgAdc(t);
+      if (raw === null) { result(t, "Waiting for live ADC reading", true); return; }
+      $("cal-raw4-" + t).value = String(raw);
+    });
+    $("cal-cap20-" + t).addEventListener("click", function(){
+      var raw = avgAdc(t);
+      if (raw === null) { result(t, "Waiting for live ADC reading", true); return; }
+      $("cal-raw20-" + t).value = String(raw);
+    });
+    $("cal-calc20-" + t).addEventListener("click", function(){
+      var raw4 = parseInt($("cal-raw4-" + t).value, 10);
+      if (isNaN(raw4) || raw4 <= 0) { result(t, "Enter or capture 4 mA count first", true); return; }
+      var raw20 = Math.round(raw4 * 5);
+      if (raw20 > 4095) raw20 = 4095;
+      $("cal-raw20-" + t).value = String(raw20);
+    });
+    $("cal-elec-" + t).addEventListener("click", function(){
+      var raw4 = parseInt($("cal-raw4-" + t).value, 10);
+      var raw20 = parseInt($("cal-raw20-" + t).value, 10);
+      var v = HmiLogic.validateElectrical(raw4, raw20);
+      if (!v.ok) { result(t, v.reason, true); return; }
+      var msg = i.label + ": electrical calibration\n" +
+        "4 mA count " + settings[t].raw4 + " → " + raw4 + "\n" +
+        "20 mA count " + settings[t].raw20 + " → " + raw20 + ".\n" +
+        "Apply these ADC counts?";
+      write(t, [{ point: i.raw4, value: raw4 }, { point: i.raw20, value: raw20 }], msg);
+    });
+    $("cal-range-" + t).addEventListener("click", function(){
+      var e4 = num("cal-e4-" + t), e20 = num("cal-e20-" + t);
+      if (e4 === null || e20 === null) { result(t, "Enter both values", true); return; }
+      applyRange(t, e4, e20);
+    });
+    $("cal-zeroapply-" + t).addEventListener("click", function(){
+      var actual = num("cal-zero-" + t);
+      if (actual === null) { result(t, "Enter the actual value", true); return; }
+      var s = settings[t], shown = HmiLogic.currentValueFromMilliamps(i, avgMa(t), s);
+      var z = HmiLogic.zeroAdjust(s.eng4 / i.regScale, s.eng20 / i.regScale, shown, actual);
+      applyRange(t, z.eng4, z.eng20);
+    });
+    ["1", "2"].forEach(function(n){
+      $("cal-p" + n + "cap-" + t).addEventListener("click", function(){
+        var v = num("cal-p" + n + "-" + t), mA = avgMa(t);
+        if (v === null) { result(t, "Enter the actual value for point " + n, true); return; }
+        points[t]["p" + n] = { value: v, mA: mA };
+        $("cal-p" + n + "txt-" + t).textContent = "captured " + v + " " + i.unit + " at " + mA.toFixed(2) + " mA";
+      });
+    });
+    $("cal-2apply-" + t).addEventListener("click", function(){
+      var p = points[t];
+      if (!p.p1 || !p.p2) { result(t, "Capture both points first", true); return; }
+      var r = HmiLogic.twoPointRange(p.p1, p.p2);
+      if (r.error) { result(t, r.error, true); return; }
+      applyRange(t, r.eng4, r.eng20);
+    });
+  });
+
+  document.addEventListener("hmi:telemetry", function(e){
+    var tl = e.detail;
+    HmiLogic.CAL_INSTRUMENTS.forEach(function(i){
+      if (!(i.tag + "_ADC" in tl)) return;
+      frames[i.tag].push({ adc: tl[i.tag + "_ADC"], mA: tl[i.tag + "_mA"] });
+      if (frames[i.tag].length > 3) frames[i.tag].shift();
+      renderLive(i.tag);
+    });
+  });
+
+  function showView(v){
+    document.querySelectorAll("#spViewTabs button").forEach(function(b){ b.classList.toggle("on", b.dataset.view === v); });
+    $("spProcessView").hidden = v !== "process";
+    $("spCalView").hidden = v !== "cal";
+    $("calViewerNote").hidden = window.hmiIsOperator();
+    if (v === "cal") {
+      // Fewer than 3 telemetry frames since the view opened must show "—"
+      // (spec Review Focus) - old frames from a previous visit must not
+      // carry over, so drop them each time the view is opened.
+      HmiLogic.CAL_INSTRUMENTS.forEach(function(i){ frames[i.tag] = []; });
+      readSettings();
+      HmiLogic.CAL_INSTRUMENTS.forEach(function(i){ renderLive(i.tag); });
+    }
+  }
+  document.querySelectorAll("#spViewTabs button").forEach(function(b){
+    b.addEventListener("click", function(){ showView(b.dataset.view); });
+  });
+  document.addEventListener("hmi:page", function(e){ if (e.detail === "setpoints" && !$("spCalView").hidden) readSettings(); });
+  document.addEventListener("hmi:signout", function(){
+    HmiLogic.CAL_INSTRUMENTS.forEach(function(i){
+      frames[i.tag] = []; points[i.tag] = {}; delete settings[i.tag];
+      fillSettings(i.tag); renderLive(i.tag); result(i.tag, "");
+      $("cal-p1txt-" + i.tag).textContent = ""; $("cal-p2txt-" + i.tag).textContent = "";
+    });
+  });
+  document.addEventListener("DOMContentLoaded", function(){
+    if (new URLSearchParams(location.search).get("view") === "cal") showView("cal");
+  });
+})();
+</script>
+
+<script>
+(function(){
+  function $(id){ return document.getElementById(id); }
+  var css = getComputedStyle(document.documentElement);
+  function tok(n){ return css.getPropertyValue(n).trim(); }
+  var INK = tok("--ink"), INK3 = tok("--ink-3"), BAND = "rgba(111,120,124,0.18)", CRIT = tok("--critical");
+  // Right-edge padding (px) that reproduces the step strip's real, visible
+  // x-axis right-side tick-label overhang on the value strips, whose own
+  // x-axis is show:false (see makePlots). Measured via getBoundingClientRect
+  // + u.bbox against the step strip's plot area at both desktop and phone
+  // width; see the fix-round-3 report for the numbers.
+  var RIGHT_PAD = 25;
+
+  var view = { hours: 2, live: true, id: null, asm: null, rows: [], mm: false, stepS: 10, events: [], lastChunkAt: 0, win: null };
+  var sessionRows = [];            // viewer / fallback: telemetry since the page opened
+  var plots = [];
+  var watchdog = null;
+
+  var STRIPS = [
+    { key: "levels", title: "Levels (cm)", series: [
+      { key: "lt01", label: "TAYA 1", stroke: INK, dash: null },
+      { key: "lt02", label: "TAYA 2", stroke: INK3, dash: [6, 4] } ], h: 150 },
+    { key: "no3", title: "NO3 (ppm)", series: [{ key: "no3", label: "NO3", stroke: INK, dash: null }], h: 90 },
+    { key: "flow", title: "Inlet flow (L/h)", series: [{ key: "flow", label: "Flow", stroke: INK, dash: null }], h: 90 },
+    { key: "dosing", title: "Dosing (mL/h)", series: [{ key: "dosing", label: "Dosing", stroke: INK, dash: null }], h: 90 },
+  ];
+
+  function width(){ return Math.max(280, $("trendStrips").clientWidth); }
+  function isPhone(){ return window.matchMedia("(max-width:600px)").matches; }
+
+  function buildData(cols){
+    // Per strip: [x, (v, lo, hi) per series]
+    return STRIPS.map(function(s){
+      var d = [cols.x];
+      s.series.forEach(function(se){ d.push(cols[se.key].v, cols[se.key].lo, cols[se.key].hi); });
+      return d;
+    });
+  }
+
+  // Flat/near-flat data (e.g. a constant fixed-rate dosing value) must not
+  // get lost inside uPlot's default auto-range padding (which can double a
+  // near-zero span); pad modestly instead. Not used for the step strip
+  // (fixed [0,1] range there - its series is dummy nulls, drawn by the plugin).
+  function valueRange(u, min, max){
+    if (min === null || max === null) return [0, 1];
+    var pad = Math.max(1, (max - min) * 0.1, Math.abs(max) * 0.02);
+    return [min - pad, max + pad];
+  }
+
+  function stepBandPlugin(getCols, getEvents){
+    return { hooks: { draw: function(u){
+      var cols = getCols(), ctx = u.ctx, top = u.bbox.top, h = u.bbox.height;
+      for (var i = 0; i < cols.x.length; i++) {
+        var x0 = u.valToPos(cols.x[i], "x", true);
+        var x1 = i + 1 < cols.x.length ? u.valToPos(cols.x[i + 1], "x", true) : u.bbox.left + u.bbox.width;
+        ctx.fillStyle = HmiLogic.stepShade(cols.step[i]);
+        ctx.fillRect(x0, top, Math.max(1, x1 - x0), h);
+      }
+      getEvents().forEach(function(ev){
+        var x = u.valToPos(ev.t, "x", true);
+        if (x < u.bbox.left || x > u.bbox.left + u.bbox.width) return;
+        if (ev.kind === "alert") {
+          ctx.fillStyle = CRIT;
+          ctx.beginPath(); ctx.moveTo(x, u.bbox.top); ctx.lineTo(x - 5 * devicePixelRatio, u.bbox.top + 9 * devicePixelRatio);
+          ctx.lineTo(x + 5 * devicePixelRatio, u.bbox.top + 9 * devicePixelRatio); ctx.closePath(); ctx.fill();
+        } else {
+          ctx.strokeStyle = INK3; ctx.lineWidth = 1;
+          ctx.beginPath(); ctx.moveTo(x, u.bbox.top); ctx.lineTo(x, u.bbox.top + 8 * devicePixelRatio); ctx.stroke();
+        }
+      });
+    } } };
+  }
+
+  var currentCols = HmiLogic.historyColumns([], false);
+  function cols(){ return currentCols; }
+  function evs(){ return view.events; }
+
+  function makePlots(){
+    $("trendStrips").innerHTML = "";
+    plots = [];
+    var hScale = isPhone() ? 0.7 : 1;
+    STRIPS.forEach(function(s, si){
+      var wrap = document.createElement("div"); wrap.className = "trend-strip";
+      var t = document.createElement("div"); t.className = "strip-title"; t.textContent = s.title;
+      wrap.appendChild(t); $("trendStrips").appendChild(wrap);
+      var series = [{}], bands = [];
+      s.series.forEach(function(se, k){
+        var base = 1 + k * 3;
+        series.push({ label: se.label, stroke: se.stroke, width: 1.5, dash: se.dash || undefined, spanGaps: false, points: { show: false } });
+        series.push({ label: se.label + " low", stroke: "transparent", points: { show: false } });
+        series.push({ label: se.label + " high", stroke: "transparent", points: { show: false } });
+        bands.push({ series: [base + 2, base + 1], fill: BAND });
+      });
+      var opts = {
+        width: width(), height: Math.round(s.h * hScale), legend: { show: false },
+        cursor: { sync: { key: "hmi-trends" }, points: { show: false } },
+        scales: { x: { time: true }, y: { range: valueRange } }, series: series, bands: bands,
+        // The x-axis itself is hidden (labels are drawn only on the step
+        // strip below) - show:true here, even with a transparent stroke,
+        // still reserves the axis's full ~50 px row height out of the
+        // strip, which starved Levels/Dosing of plot area (round 2 finding).
+        // show:false gives back that height, but also drops the ~25 px
+        // right-side overhang uPlot reserves so a real axis's last tick
+        // label isn't clipped - so the plot area's right edge no longer
+        // lined up with the step strip's. RIGHT_PAD (measured below)
+        // reproduces just that overhang via plot padding instead.
+        axes: [{ show: false },
+               { stroke: INK3, grid: { stroke: "#d9dcdd" }, size: 46 }],
+        padding: [null, RIGHT_PAD, null, null],
+        plugins: [],
+        hooks: si === 0 ? { setCursor: [function(u){ showReadout(u.cursor.idx); }] } : {},
+      };
+      var empty = [[]]; s.series.forEach(function(){ empty.push([], [], []); });
+      plots.push(new uPlot(opts, empty, wrap));
+    });
+
+    // Step strip: the shared x-axis, the step-colour band and the event
+    // ticks/alert marker, all on their own slim strip so they never crowd
+    // out a value strip's data (previously stacked into the bottom 10 px of
+    // the Dosing strip). Its own series is dummy nulls - only the plugin draws.
+    var stepWrap = document.createElement("div"); stepWrap.className = "trend-strip";
+    var stepTitle = document.createElement("div"); stepTitle.className = "strip-title"; stepTitle.textContent = "Step";
+    stepWrap.appendChild(stepTitle); $("trendStrips").appendChild(stepWrap);
+    // Height: uPlot reserves space for the (2-row: time + date) x-axis label
+    // before anything else gets a plot area, and that reservation is a fixed
+    // pixel cost, not something that shrinks with hScale (verified via
+    // u.bbox while debugging: ~50 px for the bottom x-axis label, plus a
+    // further ~17 px of top padding that appears specifically once the
+    // left-hand y-axis reserves nonzero width - both bottom and top come out
+    // of whatever height is set here). 88 px is not scaled by hScale for the
+    // same reason: shrinking it on phone would reproduce the same problem.
+    var stepOpts = {
+      width: width(), height: 88, legend: { show: false },
+      cursor: { sync: { key: "hmi-trends" }, points: { show: false } },
+      scales: { x: { time: true }, y: { range: [0, 1] } },
+      series: [{}, { stroke: "transparent", points: { show: false } }],
+      // The y-axis draws nothing (transparent/no grid/no ticks/no labels) but
+      // still reserves the same 46 px left-hand gutter as the value strips'
+      // y-axis, so the step band/ticks and the shared cursor line land at
+      // the same x as the curves above instead of drifting ~21-24 px left.
+      axes: [{ stroke: INK3, grid: { stroke: "#d9dcdd" }, show: true },
+             { show: true, size: 46, stroke: "transparent", grid: { show: false }, ticks: { show: false } }],
+      plugins: [stepBandPlugin(cols, evs)],
+    };
+    plots.push(new uPlot(stepOpts, [[], []], stepWrap));
+  }
+
+  function fmt(v, dec){ return v === null || v === undefined ? "—" : v.toFixed(dec); }
+  function showReadout(idx){
+    var c = currentCols;
+    if (idx === null || idx === undefined || !c.x.length) { $("trendReadout").innerHTML = "&nbsp;"; return; }
+    var t = c.x[idx];
+    var near = view.events.filter(function(e){ return Math.abs(e.t - t) <= view.stepS; })
+      .map(function(e){ return HmiLogic.historyEventText(e); });
+    $("trendReadout").textContent = new Date(t * 1000).toLocaleString() + "   " +
+      c.step[idx] + "-" + c.cycle[idx] + "   TAYA 1 " + fmt(c.lt01.v[idx], 0) + " cm · TAYA 2 " + fmt(c.lt02.v[idx], 0) +
+      " cm · NO3 " + fmt(c.no3.v[idx], 1) + " ppm · Flow " + fmt(c.flow.v[idx], 0) + " L/h · Dosing " + fmt(c.dosing.v[idx], 0) + " mL/h" +
+      (near.length ? "\n" + near.join(" · ") : "");
+  }
+
+  function redraw(){
+    currentCols = HmiLogic.historyColumns(view.rows, view.mm);
+    var data = buildData(currentCols);
+    data.push([currentCols.x, currentCols.x.map(function(){ return 0; })]); // step strip: dummy series, never drawn (transparent) - only the plugin draws
+    if (!plots.length) makePlots();
+    plots.forEach(function(p, i){ p.setData(data[i]); });
+  }
+
+  var trendsBusy = false;
+  function setStatus(text){ $("trendStatus").textContent = text || ""; }
+  function setBusy(busy){
+    trendsBusy = busy;
+    $("trendCancel").hidden = !busy;
+    // Tells the Alarms page (separate script block) it may now be able to
+    // start a load it was holding back (final review follow-up).
+    if (!busy) document.dispatchEvent(new CustomEvent("hmi:trends-idle"));
+  }
+  // Used by the Alarms page (separate script block) to avoid starting a
+  // history job - and so cancelling this one on the PLC, which only runs
+  // one job at a time - while Trends is still loading (final review #1).
+  // Gated by staleness (historyStillBusy): a job silently dropped (e.g.
+  // link loss, final review #2) while this page is hidden never calls
+  // setBusy(false) itself - its watchdog is stopped while hidden - so
+  // `trendsBusy` alone could otherwise stay true forever and block Alarms
+  // permanently (final review follow-up).
+  window.hmiTrendsBusy = function(){
+    return HmiLogic.historyStillBusy(trendsBusy, Date.now() - view.lastChunkAt);
+  };
+
+  function stopWatchdog(){ if (watchdog) { clearInterval(watchdog); watchdog = null; } }
+  function startWatchdog(){
+    stopWatchdog();
+    watchdog = setInterval(function(){
+      if (Date.now() - view.lastChunkAt > 10000) { stopWatchdog(); setBusy(false); setStatus(HmiLogic.historyErrorText("timeout")); }
+    }, 1000);
+  }
+
+  function load(win, live){
+    stopWatchdog();
+    view.win = win; view.live = live; view.rows = []; view.events = []; view.mm = false;
+    view.stepS = HmiLogic.historyStepSeconds(win.to - win.from);
+    view.asm = null; view.id = null;
+    redraw();
+    setStatus("Loading…"); setBusy(true);
+    view.lastChunkAt = Date.now();
+    var id = window.hmiRequestHistory({ from: win.from, to: win.to, series: ["fast", "events"] }, function(resp){
+      if (resp.id !== view.id) return; // a stale request's callback (e.g. its 8 s timeout) firing after a newer load()
+      if (!resp.ok) { stopWatchdog(); setBusy(false); setStatus(HmiLogic.historyErrorText(resp.error)); }
+    });
+    if (!id) return;
+    view.id = id; view.asm = HmiLogic.createHistoryAssembler(id);
+    startWatchdog();
+  }
+
+  document.addEventListener("hmi:hist", function(e){
+    if (!view.asm || !view.asm.add(e.detail)) return;
+    view.lastChunkAt = Date.now();
+    var st = view.asm.state();
+    view.rows = view.asm.rows(); view.mm = st.mm; view.events = view.asm.events();
+    if (st.stepS) view.stepS = st.stepS;
+    redraw();
+    if (!st.done) { setStatus("Loading… " + st.chunks + " chunks"); return; }
+    stopWatchdog(); setBusy(false);
+    if (st.error) setStatus(HmiLogic.historyErrorText(st.error));
+    else if (st.gap) setStatus("Some data was lost, reload to retry");
+    else setStatus("");
+  });
+
+  function loadPreset(hours){
+    view.hours = hours;
+    document.querySelectorAll("#trendPresets button").forEach(function(b){ b.classList.toggle("on", +b.dataset.hours === hours); });
+    if (!window.hmiCanLoadHistory()) { showSession(); return; }
+    load(HmiLogic.historyWindow(hours, Date.now()), true);
+  }
+
+  function showSession(){
+    view.live = true; view.mm = false; view.stepS = 10; view.events = []; view.rows = sessionRows.slice();
+    redraw();
+  }
+
+  document.querySelectorAll("#trendPresets button").forEach(function(b){
+    b.addEventListener("click", function(){ loadPreset(+b.dataset.hours); });
+  });
+  $("trendGo").addEventListener("click", function(){
+    var win = HmiLogic.historyWindowAt($("trendDate").value, $("trendTime").value, +$("trendLen").value);
+    if (!win) { setStatus("Pick a date and start time"); return; }
+    document.querySelectorAll("#trendPresets button").forEach(function(b){ b.classList.remove("on"); });
+    load(win, false);
+  });
+  $("trendCancel").addEventListener("click", function(){
+    stopWatchdog(); setBusy(false); setStatus("Cancelled");
+    view.asm = null;
+    if (!window.__hmiDemo) window.sendDashCommand("history_cancel", {}, function(){});
+  });
+
+  document.addEventListener("hmi:telemetry", function(e){
+    var row = HmiLogic.telemetryToHistoryRow(e.detail, Date.now());
+    sessionRows = HmiLogic.historyAppendLive(sessionRows, false, 10, row, 7200);
+    if ($("page-trends").hidden) return;
+    if (!window.hmiCanLoadHistory()) { showSession(); return; }
+    if (view.live && view.asm && view.asm.state().done && !view.asm.state().error) {
+      view.rows = HmiLogic.historyAppendLive(view.rows, view.mm, view.stepS, row, view.hours * 3600);
+      redraw();
+    }
+  });
+
+  var loadedOnce = false;
+  document.addEventListener("hmi:page", function(e){
+    if (e.detail !== "trends") { stopWatchdog(); return; }
+    var op = window.hmiCanLoadHistory();
+    $("trendViewerNote").hidden = op;
+    document.querySelectorAll("#trendPresets button, #trendGo").forEach(function(b){ b.disabled = !op; });
+    if (!$("trendDate").value) { var d = new Date(); $("trendDate").value = d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); }
+    requestAnimationFrame(function(){
+      makePlots();
+      if (!op) { showSession(); return; }
+      if (!loadedOnce) { loadedOnce = true; loadPreset(2); return; }
+      var st = view.asm ? view.asm.state() : null;
+      if (view.win && HmiLogic.historyNeedsReload(st)) {
+        // The running job was ended (e.g. Alarms was opened mid-load - the
+        // PLC only runs one history job at a time): reload the same window
+        // rather than leave a dead "cancelled" status and a chart stuck
+        // partial forever (final review #1).
+        load(view.win, view.live);
+      } else {
+        redraw();
+        // Still in progress (or silently dropped, e.g. by a link loss the
+        // firmware detected while this page was hidden): resume the
+        // watchdog instead of restarting the load, so a genuinely slow
+        // load isn't thrown away, but a dead one still times out instead
+        // of showing "Loading…" forever (final review #6).
+        if (view.asm && st && !st.done && !watchdog) startWatchdog();
+      }
+    });
+  });
+  document.addEventListener("hmi:signout", function(){
+    stopWatchdog(); loadedOnce = false; sessionRows = []; view.rows = []; view.events = []; view.asm = null;
+    setStatus(""); setBusy(false);
+  });
+  window.addEventListener("resize", function(){
+    if ($("page-trends").hidden || !plots.length) return;
+    plots.forEach(function(p){ p.setSize({ width: width(), height: p.height }); });
+  });
+})();
+</script>
+
+<script>
+(function(){
+  function $(id){ return document.getElementById(id); }
+
+  function renderActiveAlarms(bitmask){
+    var faults = HmiLogic.decodeFaultBitmask(bitmask);
+    var list = $("active-alarms-list");
+    var s = HmiLogic.alarmSummary(bitmask);
+    var countsHdr = $("alarmCountsHeader");
+    if (countsHdr) {
+      if (s.count === 0) {
+        countsHdr.innerHTML = '';
+      } else {
+        countsHdr.innerHTML = '(<span class="prio fault">' + s.faultText + '</span> · <span class="prio alert">' + s.alertText + '</span>)';
+      }
+    }
+    if (faults.length === 0) { list.innerHTML = '<p class="muted">No active alarms.</p>'; return; }
+    list.innerHTML = "";
+    faults.forEach(function(f){
+      var row = document.createElement("div");
+      row.className = "alarm-row";
+      var isFault = f.type === "Fault";
+      // Shape + colour + text: never colour alone (ISA-101).
+      row.innerHTML = '<span class="prio ' + (isFault ? "fault" : "alert") + '">' + (isFault ? "■ Fault" : "▲ Alert") + '</span>' +
+        '<span><strong></strong> <span class="muted"></span></span>' +
+        '<span class="mono muted small" style="margin-left:auto"></span>';
+      row.querySelector("strong").textContent = "#" + f.id + " " + f.title;
+      row.querySelector("span.muted").textContent = "· " + f.zone;
+      row.lastElementChild.textContent = f.reset + " reset";
+      list.appendChild(row);
+    });
+  }
+
+  document.addEventListener("hmi:telemetry", function(e){
+    if ("FaultBitmask" in e.detail) renderActiveAlarms(e.detail.FaultBitmask);
+  });
+  var ah = { asm: null, items: [], live: [], watchdog: null, loadedOnce: false, id: null, win: null };
+  function ahRender(){
+    var list = $("alarms-history-list"), show = $("ahShowChanges").checked;
+    list.innerHTML = "";
+    ah.live.concat(ah.items).forEach(function(it){
+      if (!it.alarm && !show) return;
+      var li = document.createElement("li");
+      li.className = it.alarm ? "alarm" : "change";
+      li.textContent = (it.alarm ? "▲ " : "") + new Date(it.t * 1000).toLocaleString() + "  " + it.text;
+      list.appendChild(li);
+    });
+    if (!list.children.length) list.innerHTML = '<li class="change">No alarms in this period.</li>';
+  }
+  function ahStop(){ if (ah.watchdog) { clearInterval(ah.watchdog); ah.watchdog = null; } }
+  function ahLoad(win){
+    ahStop(); ah.items = []; ah.live = []; ah.win = win; ah.id = null; ahRender();
+    $("ahStatus").textContent = "Loading…";
+    var last = Date.now();
+    var id = window.hmiRequestHistory({ from: win.from, to: win.to, series: ["events"] }, function(resp){
+      if (resp.id !== ah.id) return; // a stale request's callback firing after a newer ahLoad()
+      if (!resp.ok) { ahStop(); $("ahStatus").textContent = HmiLogic.historyErrorText(resp.error); }
+    });
+    if (!id) return;
+    ah.id = id;
+    ah.asm = HmiLogic.createHistoryAssembler(id);
+    ah.onChunk = function(){ last = Date.now(); };
+    ah.watchdog = setInterval(function(){
+      if (Date.now() - last > 10000) { ahStop(); $("ahStatus").textContent = HmiLogic.historyErrorText("timeout"); }
+    }, 1000);
+  }
+  document.addEventListener("hmi:hist", function(e){
+    if (!ah.asm || !ah.asm.add(e.detail)) return;
+    if (ah.onChunk) ah.onChunk();
+    var st = ah.asm.state();
+    ah.items = ah.asm.events().reverse().map(function(ev){
+      return { t: ev.t, alarm: ev.kind === "alert", text: HmiLogic.historyEventText(ev) };
+    });
+    ahRender();
+    if (!st.done) return;
+    ahStop();
+    $("ahStatus").textContent = st.error ? HmiLogic.historyErrorText(st.error) : st.gap ? "Some data was lost, reload to retry" : "";
+  });
+  document.addEventListener("hmi:alert", function(e){
+    ah.live.unshift({ t: Math.floor(Date.now() / 1000), alarm: true, text: e.detail });
+    ahRender();
+  });
+  function ahReset(){ ahStop(); ah.asm = null; ah.items = []; ah.live = []; ah.loadedOnce = false; $("ahStatus").textContent = ""; ahRender(); }
+  $("ahLast24").addEventListener("click", function(){ ahLoad(HmiLogic.historyWindow(24, Date.now())); });
+  $("ahGo").addEventListener("click", function(){
+    var win = HmiLogic.historyWindowAt($("ahDate").value, "00:00", 24);
+    if (!win) { $("ahStatus").textContent = "Pick a day"; return; }
+    ahLoad(win);
+  });
+  $("ahShowChanges").addEventListener("change", ahRender);
+
+  // Starts (or reloads) the Alarms load if one is pending - a first-ever
+  // load that was held back, or a load that needs reloading because
+  // another view's job cancelled it (final review #1). While Trends is
+  // still busy, does NOT start a job (which would cancel Trends's, mid-
+  // load, on the PLC - it only runs one at a time); it instead shows a
+  // waiting status and leaves the load pending, WITHOUT rendering the
+  // empty-list placeholder (which would falsely read as "no alarms" for
+  // a period that was never actually loaded - final review follow-up).
+  // Returns true if it either started a load or is waiting on one (the
+  // caller should then skip its own ahRender() fallback).
+  function ahTryLoad(){
+    var pending = !ah.loadedOnce || (ah.asm && HmiLogic.historyNeedsReload(ah.asm.state()) && ah.win);
+    if (!pending) return false;
+    if (window.hmiTrendsBusy && window.hmiTrendsBusy()) {
+      $("ahStatus").textContent = "Waiting for the Trends load to finish…";
+      return true;
+    }
+    if (!ah.loadedOnce) { ah.loadedOnce = true; ahLoad(HmiLogic.historyWindow(24, Date.now())); }
+    else ahLoad(ah.win);
+    return true;
+  }
+  // Trends finishing (for any reason: done, error, watchdog or cancel) may
+  // unblock an Alarms load that was left pending above.
+  document.addEventListener("hmi:trends-idle", function(){
+    if ($("page-alarms").hidden || !window.hmiCanLoadHistory()) return;
+    ahTryLoad();
+  });
+  document.addEventListener("hmi:page", function(e){
+    if (e.detail !== "alarms") return;
+    var op = window.hmiCanLoadHistory();
+    $("ahViewerNote").hidden = op;
+    ["ahLast24", "ahGo", "ahDate"].forEach(function(id){ $(id).disabled = !op; });
+    if (!op) { ahRender(); return; }
+    if (!ahTryLoad()) ahRender();
+  });
+
+  function wireAlarmAction(buttonId, action, message){
+    $(buttonId).addEventListener("click", function(){
+      window.hmiConfirm(message).then(function(ok){
+        if (!ok) return;
+        $("alarm-action-result").textContent = "Sending…";
+        sendDashCommand(action, {}, function(resp){
+          $("alarm-action-result").textContent = resp.ok ? "Done." : ("Failed: " + resp.error);
+        });
+      });
+    });
+  }
+  wireAlarmAction("stop-btn", "stop", "Stop the process now (remote stop)? All pumps stop.");
+  wireAlarmAction("resume-btn", "resume", "Resume the process (clear remote stop, and clear latched faults whose condition is gone)?");
+  wireAlarmAction("clear-fault-btn", "clear_fault", "Clear latched faults? Faults whose condition is still present will trip again.");
+
+  // HMI Start/Stop (2026-09-28 controller ruling): a normal run-permit
+  // in series with the hardware System_Switch, not an E-stop - separate
+  // from stop-btn/resume-btn above, which remain the REMOTE EMERGENCY
+  // stop/resume. Momentary coils - the firmware self-clears them, so the
+  // page only ever writes 1.
+  function wireProcessAction(buttonId, point, message){
+    $(buttonId).addEventListener("click", function(){
+      window.hmiConfirm(message).then(function(ok){
+        if (!ok) return;
+        $("process-action-result").textContent = "Sending…";
+        sendDashCommand("coil", { point: point, value: 1 }, function(resp){
+          $("process-action-result").textContent = resp.ok ? "Done." : ("Failed: " + resp.error);
+        });
+      });
+    });
+  }
+  wireProcessAction("hmi-start-btn", "HMI_Start", "Start the process? It runs only while the System switch is ON.");
+  wireProcessAction("hmi-stop-btn", "HMI_Stop", "Stop the process (normal stop, no alarm)? It stays stopped until Start.");
+
+  function updateProcessButtons(){
+    var op = window.hmiIsOperator ? window.hmiIsOperator() : false;
+    var startBtn = $("hmi-start-btn"), stopBtn = $("hmi-stop-btn");
+    if (startBtn) {
+      startBtn.disabled = !op;
+      startBtn.title = op ? "" : "Sign in as operator to start the process";
+    }
+    if (stopBtn) {
+      stopBtn.disabled = !op;
+      stopBtn.title = op ? "" : "Sign in as operator to stop the process";
+    }
+  }
+
+  document.addEventListener("hmi:telemetry", function(e){
+    var t = e.detail;
+    var el = $("process-run-status");
+    if (el) {
+      if (!("HMI_Run" in t)) { el.textContent = "Run permission: unknown"; }
+      else { el.textContent = "Run permission: " + (t.HMI_Run ? "ON" : "OFF"); }
+    }
+    updateProcessButtons();
+  });
+
+  // Viewer tier: disable rather than let a confirmed click fail with not_operator.
+  document.addEventListener("hmi:page", function(e){
+    var op = window.hmiIsOperator();
+    if (e.detail === "alarms") {
+      ["stop-btn", "resume-btn", "clear-fault-btn"].forEach(function(id){ $(id).disabled = !op; });
+      $("alarmReadOnly").hidden = op;
+    }
+    updateProcessButtons();
+  });
+  document.addEventListener("hmi:signout", function(){
+    $("alarm-action-result").textContent = "";
+    $("process-action-result").textContent = "";
+    ahReset();
+    $("active-alarms-list").innerHTML = '<p class="muted">No active alarms.</p>';
+  });
+})();
+</script>
+
+<script>
+(function(){
+  var TRANSPORT_NAMES = { 0: "None", 1: "Ethernet", 2: "WiFi", 3: "LTE" };
+
+  document.addEventListener("hmi:telemetry", function(e){
+    var t = e.detail;
+    if (!("ActiveTransport" in t)) return;
+    document.getElementById("transportStatus").textContent =
+      "Active: " + (TRANSPORT_NAMES[t.ActiveTransport] || t.ActiveTransport) +
+      " · WiFi: " + (t.WiFi_Connected ? ("connected, RSSI " + t.WiFi_RSSI + " dBm") : "not connected");
+    var sd = HmiLogic.sdCardStatus(t.SD_OK), el = document.getElementById("sdStatus");
+    el.hidden = !sd;
+    if (sd) {
+      el.textContent = "SD card: " + sd.text;
+      el.style.color = sd.abnormal ? "var(--warning)" : "";
+      el.style.fontWeight = sd.abnormal ? "700" : "";
+    }
+    var lp = document.getElementById("loopStatus");
+    lp.hidden = typeof t.Loop_Max_ms !== "number";
+    if (!lp.hidden) lp.textContent = "Slowest PLC loop pass (last 5 s): " + t.Loop_Max_ms + " ms";
+  });
+
+  var TOGGLES = [
+    { point: "Ethernet_Disabled", label: "Disable Ethernet" },
+    { point: "WiFi_Disabled", label: "Disable WiFi" },
+    { point: "LTE_Disabled", label: "Disable LTE" },
+  ];
+  var toggleState = {};
+  var op = false; // operator tier, refreshed on every hmi:page "system"
+  // A toggle whose state has not been read shows "state unknown" and stays
+  // disabled: without the state there is no safe direction to toggle.
+  function renderToggles(){
+    var container = document.getElementById("transportToggles");
+    container.innerHTML = "";
+    TOGGLES.forEach(function(tg){
+      var btn = document.createElement("button");
+      btn.className = "action";
+      btn.type = "button";
+      if (typeof toggleState[tg.point] !== "number") {
+        btn.textContent = tg.label.replace("Disable ", "") + ": state unknown";
+        btn.disabled = true;
+        container.appendChild(btn);
+        return;
+      }
+      var isOn = toggleState[tg.point] === 1;
+      var label = isOn ? tg.label.replace("Disable", "Enable") : tg.label;
+      btn.textContent = label + (isOn ? " (currently disabled)" : "");
+      btn.disabled = !op;
+      btn.addEventListener("click", function(){
+        var msg = isOn ? label + "?" : label + "? Make sure another transport is keeping the device reachable.";
+        window.hmiConfirm(msg).then(function(ok){
+          if (!ok) return;
+          var resultEl = document.getElementById("transportResult");
+          resultEl.textContent = "Sending…";
+          sendDashCommand("coil", { point: tg.point, value: isOn ? 0 : 1 }, function(resp){
+            if (resp.ok) { toggleState[tg.point] = isOn ? 0 : 1; renderToggles(); resultEl.textContent = "Done."; }
+            else resultEl.textContent = "Failed: " + (resp.error || "unknown");
+          });
+        });
+      });
+      container.appendChild(btn);
+    });
+  }
+  renderToggles();
+
+  var dosingModeState = {};
+  var DOSING_MODES = [
+    { id: "manual", label: "Manual", desc: "Manual control: uses fixed flow setpoint (SP_F01). Run/stop controlled manually from Overview faceplate." },
+    { id: "auto-no3", label: "Auto (NO3)", desc: "Auto (NO3): sequencer-controlled dosing rate adjusted dynamically by NO3 meter (SP_F02)." },
+    { id: "auto-fixed", label: "Auto (fixed flow)", desc: "Auto (fixed flow): sequencer-controlled dosing with fixed flow setpoint (SP_F01)." }
+  ];
+
+  function getActiveDosingMode(){
+    if (typeof dosingModeState.DP1_Mode !== "number" || typeof dosingModeState.B14 !== "number") {
+      var ovCoils = (typeof window.hmiOverviewCoils === "function") ? window.hmiOverviewCoils() : {};
+      if (typeof dosingModeState.DP1_Mode !== "number" && typeof ovCoils.DP1_Mode === "number") dosingModeState.DP1_Mode = ovCoils.DP1_Mode;
+      if (typeof dosingModeState.B14 !== "number" && typeof ovCoils.B14 === "number") dosingModeState.B14 = ovCoils.B14;
+    }
+    if (typeof dosingModeState.DP1_Mode !== "number" || typeof dosingModeState.B14 !== "number") return null;
+    if (dosingModeState.DP1_Mode === 1) return "manual";
+    if (dosingModeState.DP1_Mode === 0 && dosingModeState.B14 === 1) return "auto-no3";
+    if (dosingModeState.DP1_Mode === 0 && dosingModeState.B14 === 0) return "auto-fixed";
+    return null;
+  }
+
+  function renderDosingMode(){
+    var el = document.getElementById("dosingModeControl");
+    if (!el) return;
+    el.innerHTML = "";
+
+    var activeMode = getActiveDosingMode();
+
+    var seg = document.createElement("div");
+    seg.className = "seg";
+    seg.setAttribute("role", "radiogroup");
+    seg.setAttribute("aria-label", "Dosing pump mode");
+
+    DOSING_MODES.forEach(function(m){
+      var btn = document.createElement("button");
+      btn.type = "button";
+      btn.dataset.dpmode = m.id;
+      btn.textContent = m.label;
+      if (activeMode !== null && activeMode === m.id) {
+        btn.classList.add("on");
+        btn.setAttribute("aria-checked", "true");
+      } else {
+        btn.setAttribute("aria-checked", "false");
+      }
+      btn.disabled = !op;
+      btn.addEventListener("click", function(){
+        if (activeMode === m.id) return;
+        var msg = "";
+        var writes = [];
+        if (m.id === "manual") {
+          msg = "Switch dosing (DP1) to Manual?";
+          writes = [{ point: "DP1_Mode", value: 1 }];
+        } else if (m.id === "auto-no3") {
+          msg = "Switch dosing (DP1) to Auto (by NO3 meter)?";
+          writes = [{ point: "DP1_Mode", value: 0 }, { point: "B14", value: 1 }];
+        } else if (m.id === "auto-fixed") {
+          msg = "Switch dosing (DP1) to Auto (fixed flow SP_F01)?";
+          writes = [{ point: "DP1_Mode", value: 0 }, { point: "B14", value: 0 }];
+        }
+        window.hmiConfirm(msg).then(function(ok){
+          if (!ok) return;
+          var resultEl = document.getElementById("dosingModeResult");
+          resultEl.textContent = "Sending…";
+          window.sendDashBatchWrite(writes, function(resp){
+            if (resp.ok) {
+              writes.forEach(function(w){
+                dosingModeState[w.point] = w.value;
+                if (window.hmiSetCoil) window.hmiSetCoil(w.point, w.value);
+              });
+              renderDosingMode();
+              resultEl.textContent = "Done.";
+            } else {
+              resultEl.textContent = "Failed: " + (resp.error || "unknown");
+            }
+          });
+        });
+      });
+      seg.appendChild(btn);
+    });
+
+    el.appendChild(seg);
+
+    var note = document.createElement("div");
+    note.className = "muted small";
+    note.style.marginTop = "6px";
+    if (activeMode === null) {
+      note.textContent = "Mode unknown — sign in as operator to read and set dosing mode.";
+    } else {
+      var descText = "";
+      for (var i = 0; i < DOSING_MODES.length; i++) {
+        if (DOSING_MODES[i].id === activeMode) { descText = DOSING_MODES[i].desc; break; }
+      }
+      note.textContent = descText;
+    }
+    el.appendChild(note);
+  }
+  renderDosingMode();
+
+  function refreshSystemReads(){
+    readPoints(["Ethernet_Disabled", "WiFi_Disabled", "LTE_Disabled", "B14", "DP1_Mode"], function(resp){
+      if (!resp.ok) {
+        document.getElementById("transportResult").textContent = "Could not read transport and dosing state: " + (resp.error || "unknown");
+        return;
+      }
+      Object.assign(toggleState, resp.values);
+      Object.assign(dosingModeState, resp.values);
+      if (window.hmiSetCoil) {
+        if (typeof resp.values.B14 === "number") window.hmiSetCoil("B14", resp.values.B14);
+        if (typeof resp.values.DP1_Mode === "number") window.hmiSetCoil("DP1_Mode", resp.values.DP1_Mode);
+      }
+      renderToggles();
+      renderDosingMode();
+    });
+  }
+
+  // Viewer tier must never see an enabled control that silently fails
+  // (same pattern as the Simulation panel's setControlsEnabled).
+  function setSystemControlsEnabled(on){
+    document.getElementById("rebootBtn").disabled = !on;
+    document.getElementById("sendDailyEmailNowBtn").disabled = !on;
+    document.getElementById("emailReqDate").disabled = !on;
+    Object.keys(MAIL_SLOTS).forEach(function(slotKey){
+      mailInputElFor(slotKey).disabled = !on;
+      mailButtonElFor(slotKey).disabled = !on;
+    });
+    document.getElementById("sysReadOnly").hidden = on;
+    renderToggles();
+    renderDosingMode();
+  }
+  document.addEventListener("hmi:page", function(e){
+    if (e.detail !== "system") return;
+    op = window.hmiIsOperator();
+    setSystemControlsEnabled(op);
+    if (op) { refreshSystemReads(); refreshMailReads(); }
+  });
+  // Sign-out: forget the previous session's device state.
+  document.addEventListener("hmi:signout", function(){
+    toggleState = {}; dosingModeState = {}; op = false;
+    ["transportStatus", "transportResult", "dosingModeResult", "rebootResult", "sendDailyEmailResult"].forEach(function(id){
+      document.getElementById(id).textContent = "";
+    });
+    Object.keys(MAIL_SLOTS).forEach(function(slotKey){
+      mailInputElFor(slotKey).value = "";
+      document.getElementById("mailResult-" + slotKey).textContent = "";
+    });
+    renderToggles();
+    renderDosingMode();
+  });
+
+  document.getElementById("rebootBtn").addEventListener("click", function(){
+    window.hmiConfirm("Reboot the PLC now? The process stops while it restarts (about 30 s).", "Reboot").then(function(ok){
+      if (!ok) return;
+      var resultEl = document.getElementById("rebootResult");
+      resultEl.textContent = "Sending…";
+      var bootBefore = window.__hmiLastBoot || null;
+      sendDashCommand("coil", { point: "System_Reboot", value: 1 }, function(resp){
+        var r = HmiLogic.rebootReplyText(resp);
+        resultEl.textContent = r.text;
+        if (!r.wait) return;
+        var giveUp;
+        function onBoot(e){
+          if (!HmiLogic.isNewBoot(bootBefore, e.detail)) return;
+          document.removeEventListener("hmi:boot", onBoot);
+          clearTimeout(giveUp);
+          resultEl.textContent = "Rebooted OK " + new Date().toLocaleTimeString() + " (" + (e.detail.build || "?") + ")";
+        }
+        document.addEventListener("hmi:boot", onBoot);
+        if (HmiLogic.isNewBoot(bootBefore, window.__hmiLastBoot)) onBoot({ detail: window.__hmiLastBoot });
+        giveUp = setTimeout(function(){
+          document.removeEventListener("hmi:boot", onBoot);
+          resultEl.textContent = "PLC not back after 3 min - check 'Last restart' on this page";
+        }, 180000);
+      });
+    });
+  });
+
+  // Email: 32 packed registers per slot ("recipient" = the daily-digest
+  // block, "alert0".."alert4" = the 5 alert-recipient slots), plus each
+  // slot's own apply coil. Mirrors daily_email.cpp's packString()/
+  // unpackString() exactly (see hmi-logic.js).
+  var MAIL_SLOTS = {
+    recipient: { regPrefix: "Mail_Recipient_Reg", applyPoint: "Mail_Recipient_Apply", count: 32 },
+  };
+  for (var slot = 0; slot < 5; slot++) {
+    MAIL_SLOTS["alert" + slot] = {
+      regPrefix: "Mail_Recipient_AlertReg" + slot + "_", applyPoint: "Mail_Recipient_AlertApply" + slot, count: 32,
+    };
+  }
+
+  function mailRegPoints(slotDef){
+    var pts = [];
+    for (var i = 0; i < slotDef.count; i++) pts.push(slotDef.regPrefix + i);
+    return pts;
+  }
+
+  function mailInputElFor(slotKey){
+    return slotKey === "recipient" ? document.getElementById("mailRecipient") : document.getElementById("mail-input-" + slotKey);
+  }
+  function mailButtonElFor(slotKey){
+    return slotKey === "recipient" ? document.querySelector('[data-mail-slot="recipient"]') : document.getElementById("mail-set-" + slotKey);
+  }
+
+  // Read-back for all 6 mail slots: reconstructs the ordered 32-register
+  // array each slot's regPrefix+0..regPrefix+31 points to (resp.values is a
+  // {pointName: value} lookup, not already ordered) and unpacks it back to
+  // an email string via the same packString()/unpackString() convention
+  // packEmailToRegisters() uses to write it.
+  function refreshMailReads(){
+    Object.keys(MAIL_SLOTS).forEach(function(slotKey){
+      var slotDef = MAIL_SLOTS[slotKey];
+      readPoints(mailRegPoints(slotDef), function(resp){
+        if (!resp.ok) return;
+        var regs = [];
+        for (var i = 0; i < slotDef.count; i++) regs.push(resp.values[slotDef.regPrefix + i]);
+        var inputEl = mailInputElFor(slotKey);
+        if (inputEl) inputEl.value = HmiLogic.unpackRegistersToEmail(regs);
+      });
+    });
+  }
+
+  function setMailSlot(slotKey, inputEl, resultEl){
+    var slotDef = MAIL_SLOTS[slotKey];
+    var email = inputEl.value.trim();
+    if (!email) {
+      window.hmiConfirm("Clear this recipient? Emails will no longer be sent to it.", "Clear").then(function(ok){
+        if (ok) writeMailSlot(slotDef, "", resultEl);
+      });
+      return;
+    }
+    writeMailSlot(slotDef, email, resultEl);
+  }
+
+  function writeMailSlot(slotDef, email, resultEl){
+    var regs;
+    try { regs = HmiLogic.packEmailToRegisters(email, slotDef.count); }
+    catch (err) { resultEl.textContent = "Too long"; return; }
+    resultEl.textContent = "Saving...";
+    var writes = regs.map(function(value, i){ return { point: slotDef.regPrefix + i, value: value }; });
+    writes.push({ point: slotDef.applyPoint, value: 1 });
+    sendDashBatchWrite(writes, function(resp){
+      var r = HmiLogic.batchOutcome(resp);
+      resultEl.textContent = r.error ? "Failed: " + r.error
+        : r.applied ? "Saved" : "Partly saved, " + r.failed.length + " register(s) failed. Set it again.";
+    });
+  }
+
+  document.querySelector('[data-mail-slot="recipient"]').addEventListener("click", function(){
+    setMailSlot("recipient", document.getElementById("mailRecipient"), document.getElementById("mailResult-recipient"));
+  });
+
+  var alertSlotsEl = document.getElementById("mailAlertSlots");
+  for (var s = 0; s < 5; s++) {
+    (function(slotKey, slotIndex){
+      var row = document.createElement("div");
+      row.className = "row-line";
+      row.innerHTML =
+        '<label style="font-size:13px;min-width:160px">Alert recipient ' + (slotIndex + 1) + '</label>' +
+        '<input type="email" style="flex:1;max-width:300px" id="mail-input-' + slotKey + '">' +
+        '<button type="button" class="primary" id="mail-set-' + slotKey + '">Set</button>' +
+        '<span id="mailResult-' + slotKey + '" style="font-size:12px"></span>';
+      row.querySelector("button").addEventListener("click", function(){
+        setMailSlot(slotKey, document.getElementById("mail-input-" + slotKey), document.getElementById("mailResult-" + slotKey));
+      });
+      alertSlotsEl.appendChild(row);
+    })("alert" + s, s);
+  }
+
+  var emailWait = null;
+  document.getElementById("sendDailyEmailNowBtn").addEventListener("click", function(){
+    var resultEl = document.getElementById("sendDailyEmailResult");
+    var writes = HmiLogic.emailRequestWrites(document.getElementById("emailReqDate").value);
+    if (!writes) { resultEl.textContent = "Pick a valid day"; return; }
+    resultEl.textContent = "Sending...";
+    // v66: with a fragmented heap the PLC pauses MQTT for the send (a few
+    // minutes), so the result can come late and the trigger's own reply can
+    // time out even though the PLC took it.
+    function waitForResult(text){
+      resultEl.textContent = text;
+      clearTimeout(emailWait);
+      emailWait = setTimeout(function(){ emailWait = null; resultEl.textContent = "Triggered (no result reported within 10 min) - check the inbox"; }, 600000);
+    }
+    sendDashBatchWrite(writes, function(resp){
+      if (resp && resp.error === "timeout") {
+        waitForResult("No reply yet - the PLC may already be sending with its remote link paused; waiting for the result (up to 10 min)...");
+        return;
+      }
+      var out = HmiLogic.batchOutcome(resp);
+      if (!out.applied) { resultEl.textContent = "Failed: " + (out.error || out.failed.map(function(f){ return f.point; }).join(", ")); return; }
+      sendDashBatchWrite(HmiLogic.emailResetWrites(), function(){}); // back to "yesterday" for the next send
+      waitForResult("Triggered, waiting for the PLC's result...");
+    });
+  });
+  document.addEventListener("hmi:debug", function(e){
+    var st = HmiLogic.dailyEmailStatus(e.detail);
+    if (!st || emailWait === null) return;
+    document.getElementById("sendDailyEmailResult").textContent = st.text;
+    if (st.final) { clearTimeout(emailWait); emailWait = null; }
+  });
+})();
+</script>
+
+<script>
+(function(){
+  function $(id){ return document.getElementById(id); }
+  var rowsEl = $("simRows");
+
+  HmiLogic.SIM_POINTS.forEach(function(p){
+    var row = document.createElement("div");
+    row.className = "sim-row";
+    row.id = "simrow-" + p.name;
+    var entry = p.kind === "digital"
+      ? '<select id="simval-' + p.name + '" aria-label="Simulated value"></select>'
+      : '<input id="simval-' + p.name + '" type="text" inputmode="numeric" aria-label="Simulated value" placeholder="' + p.min + '–' + p.max + ' ' + p.unit + '">';
+    row.innerHTML =
+      '<div><span></span> <span class="mono muted small">' + p.name + '</span></div>' +
+      '<div class="small">Real: <span class="mono" id="simreal-' + p.name + '">—</span></div>' +
+      entry +
+      '<button type="button" class="action" id="simbtn-' + p.name + '">Simulate</button>' +
+      '<button type="button" class="secondary" id="simset-' + p.name + '" hidden>Set value</button>';
+    row.querySelector("div span").textContent = p.label;
+    if (p.kind === "digital") {
+      // Per-point labels: LS0_low is active-low (1 = level OK, 0 = LOW).
+      var sel = row.querySelector("select");
+      p.options.forEach(function(o){
+        var opt = document.createElement("option");
+        opt.value = String(o.value); opt.textContent = o.label;
+        sel.appendChild(opt);
+      });
+    }
+    rowsEl.appendChild(row);
+    $("simbtn-" + p.name).addEventListener("click", function(){ toggle(p); });
+    $("simset-" + p.name).addEventListener("click", function(){ setValue(p); });
+  });
+
+  function simulatedNow(name){
+    var t = window.__hmiLastTelemetry || {};
+    return HmiLogic.simPointsFromMask(t.Sim_Mask || 0).indexOf(name) >= 0;
+  }
+  function readEntry(p){
+    var def = p.kind === "digital" ? { min: 0, max: 1 } : p;
+    return HmiLogic.validateNumber(def, $("simval-" + p.name).value);
+  }
+  function operatorOrExplain(){
+    if (window.hmiIsOperator()) return true;
+    $("simResult").textContent = "Read-only: sign in as operator to simulate values.";
+    return false;
+  }
+
+  // Global constraint (Review Focus): a viewer-tier login must never see an
+  // enabled control that silently fails - disable the sim controls outright
+  // rather than only rejecting the click.
+  function setControlsEnabled(on){
+    HmiLogic.SIM_POINTS.forEach(function(p){
+      $("simval-" + p.name).disabled = !on;
+      $("simbtn-" + p.name).disabled = !on;
+      $("simset-" + p.name).disabled = !on;
+    });
+  }
+  document.addEventListener("hmi:page", function(e){
+    if (e.detail !== "system") return;
+    var op = window.hmiIsOperator();
+    setControlsEnabled(op);
+    if (!op) $("simResult").textContent = "Read-only: sign in as operator to simulate values.";
+  });
+
+  // ok:true replies still carry per-point results; a failed entry means
+  // only part of the batch was applied (e.g. enabled with the old value).
+  function simBatchText(resp, okText, failPrefix){
+    var r = HmiLogic.batchOutcome(resp);
+    if (r.error) return failPrefix + r.error;
+    if (r.applied) return okText;
+    return "Partly applied. Not applied: " + r.failed.map(function(f){ return f.point + " (" + f.error + ")"; }).join(", ") +
+      ". Check the SIM tag and value above; stop simulating if it is wrong.";
+  }
+
+  function toggle(p){
+    if (!operatorOrExplain()) return;
+    if (simulatedNow(p.name)) {
+      // Back to the real value - the safe direction, no confirm needed.
+      sendDashCommand("coil", { point: p.name + "_Sim", value: 0 }, function(resp){
+        $("simResult").textContent = resp.ok ? p.label + ": back to the real value." : ("Failed: " + resp.error);
+      });
+      return;
+    }
+    var v = readEntry(p);
+    if (!v.ok) { $("simResult").textContent = p.label + ": " + v.reason; return; }
+    var real = HmiLogic.realValue(p.name, window.__hmiLastTelemetry || {});
+    window.hmiConfirm(HmiLogic.simConfirmMessage(p.name, v.value, real), "Simulate").then(function(ok){
+      if (!ok) return;
+      $("simResult").textContent = "Sending…";
+      sendDashBatchWrite(HmiLogic.simEnableWrites(p.name, v.value), function(resp){
+        $("simResult").textContent = simBatchText(resp, p.label + " is now simulated.", "Failed, nothing changed: ");
+      });
+    });
+  }
+
+  function setValue(p){
+    if (!operatorOrExplain()) return;
+    var v = readEntry(p);
+    if (!v.ok) { $("simResult").textContent = p.label + ": " + v.reason; return; }
+    var real = HmiLogic.realValue(p.name, window.__hmiLastTelemetry || {});
+    window.hmiConfirm(HmiLogic.simConfirmMessage(p.name, v.value, real), "Set value").then(function(ok){
+      if (!ok) return;
+      sendDashBatchWrite([{ point: p.name + "_SimValue", value: v.value }], function(resp){
+        $("simResult").textContent = simBatchText(resp, p.label + " simulated value updated.", "Failed: ");
+      });
+    });
+  }
+
+  document.addEventListener("hmi:telemetry", function(e){
+    var t = e.detail;
+    var sims = HmiLogic.simPointsFromMask(t.Sim_Mask || 0);
+    HmiLogic.SIM_POINTS.forEach(function(p){
+      var real = HmiLogic.realValue(p.name, t);
+      $("simreal-" + p.name).textContent = real === null ? "—" : HmiLogic.simValueText(p.name, real);
+      var on = sims.indexOf(p.name) >= 0;
+      $("simbtn-" + p.name).textContent = on ? "Stop simulating" : "Simulate";
+      $("simset-" + p.name).hidden = !on;
+      $("simrow-" + p.name).classList.toggle("is-sim-row", on);
+    });
+  });
+  document.addEventListener("hmi:signout", function(){
+    $("simResult").textContent = "";
+    HmiLogic.SIM_POINTS.forEach(function(p){
+      $("simreal-" + p.name).textContent = "—";
+      $("simbtn-" + p.name).textContent = "Simulate";
+      $("simset-" + p.name).hidden = true;
+      $("simrow-" + p.name).classList.remove("is-sim-row");
+    });
+  });
+})();
+</script>
+<script>
+// Keeps --topbar-h equal to the sticky header + SIM strip's real height, so
+// the pump popup and the SIM panel's scroll target sit just below it.
+(function(){
+  var bar = document.querySelector(".topbar");
+  function measure(){ document.documentElement.style.setProperty("--topbar-h", bar.offsetHeight + "px"); }
+  measure();
+  if (window.ResizeObserver) new ResizeObserver(measure).observe(bar);
+  else window.addEventListener("resize", measure);
+})();
+</script>
+<script>
+// System page: firmware + last restart, from the retained boot message.
+(function(){
+  var box = document.getElementById("bootInfo");
+  function line(label, value, critical){
+    var div = document.createElement("div");
+    var k = document.createElement("span"); k.className = "muted"; k.textContent = label + ": ";
+    var v = document.createElement("span"); v.textContent = value;
+    if (critical) { v.style.color = "var(--critical)"; v.style.fontWeight = "700"; }
+    div.appendChild(k); div.appendChild(v);
+    return div;
+  }
+  function render(boot){
+    var d = HmiLogic.describeBoot(boot);
+    if (!d) return;
+    box.className = "small";
+    box.textContent = "";
+    box.appendChild(line("Firmware", d.build));
+    var when = d.bootedAt ? d.bootedAt.toLocaleString() : "time unknown (clock not set at boot)";
+    box.appendChild(line("Last restart", d.reasonText + " · " + when, d.abnormal));
+    box.appendChild(line("Update status", d.imageText, false));
+    box.appendChild(line("Came online via", d.transportText + " · " + d.wifiText));
+    if (d.sd) {
+      var sdLine = line("SD card at boot", d.sd.text, false);
+      if (d.sd.abnormal) { sdLine.lastChild.style.color = "var(--warning)"; sdLine.lastChild.style.fontWeight = "700"; }
+      box.appendChild(sdLine);
+    }
+  }
+  document.addEventListener("hmi:boot", function(e){ render(e.detail); });
+  document.addEventListener("hmi:signout", function(){
+    window.__hmiLastBoot = null;
+    box.className = "small muted";
+    box.textContent = "Waiting for the PLC's boot report (firmware 2026-09-24-v6 or newer).";
+  });
+  if (window.__hmiLastBoot) render(window.__hmiLastBoot);
+})();
+</script>
+</body>
+</html>
