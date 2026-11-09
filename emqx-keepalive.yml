@@ -3,8 +3,9 @@ name: EMQX Keepalive Heartbeat
 
 on:
   schedule:
-    - cron: '0 6 */3 * *'  # Runs every 3 days at 06:00 UTC
-  workflow_dispatch:        # Allows manual trigger via the Actions tab
+    # Runs at 06:00 UTC on the 1st and 15th of every month
+    - cron: '0 6 1,15 * *'
+  workflow_dispatch:
 
 jobs:
   mqtt-ping:
