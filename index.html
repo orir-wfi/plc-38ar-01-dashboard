@@ -1540,7 +1540,8 @@
         '<span class="sp-pv" id="sp-pv-' + sp.name + '" title="Current live value">Current: —</span>' +
         '<input id="sp-input-' + sp.name + '" type="text" inputmode="numeric" autocomplete="off">' +
         '<span class="muted small">' + sp.unit + '</span>' +
-        '<div class="err" id="sp-err-' + sp.name + '" hidden></div>';
+        '<div class="err" id="sp-err-' + sp.name + '" hidden></div>' +
+        '<div class="muted small sp-hint" id="sp-hint-' + sp.name + '" style="grid-column:1/-1;font-size:12px;margin-top:-2px;" hidden></div>';
       row.querySelector("label span").textContent = sp.label;
       var input = row.querySelector("input");
       input.title = "Allowed " + sp.min + "–" + sp.max + " " + sp.unit;
@@ -1551,12 +1552,27 @@
         input.classList.toggle("changed", v.ok && v.value !== undefined && v.value !== original[sp.name]);
         $("sp-err-" + sp.name).hidden = v.ok;
         $("sp-err-" + sp.name).textContent = v.ok ? "" : v.reason;
+        updateSpHint(sp.name, input.value);
         updateReviewBar();
       });
       body.appendChild(row);
     });
     $("spGroups").appendChild(section);
   });
+
+  function updateSpHint(spName, val) {
+    var hint = $("sp-hint-" + spName);
+    if (!hint) return;
+    if (spName === "T_20") {
+      var flow = HmiLogic.flowTriggerFromTimer(val);
+      if (flow !== null) {
+        hint.textContent = "Trips when flow drops below ~" + flow + " L/h (3600 / " + val + " s at 1 L/pulse)";
+        hint.hidden = false;
+      } else {
+        hint.hidden = true;
+      }
+    }
+  }
 
   function setInputsEnabled(on){
     HmiLogic.PROCESS_SETPOINTS.forEach(function(sp){ $("sp-input-" + sp.name).disabled = !on; });
@@ -1568,6 +1584,7 @@
       input.value = typeof original[sp.name] === "number" ? String(original[sp.name]) : "";
       input.classList.remove("changed", "invalid");
       $("sp-err-" + sp.name).hidden = true;
+      updateSpHint(sp.name, input.value);
     });
   }
 
@@ -1608,7 +1625,13 @@
     var d = HmiLogic.setpointDiff(original, edited);
     if (!d.changes.length || d.errors.length) return;
     var lines = d.changes.map(function(c){
-      return c.label + " (" + c.name + "): " + (c.from === null ? "—" : c.from) + " → " + c.to;
+      var extra = "";
+      if (c.name === "T_20") {
+        var fFrom = c.from !== null ? HmiLogic.flowTriggerFromTimer(c.from) : null;
+        var fTo = HmiLogic.flowTriggerFromTimer(c.to);
+        extra = " (~" + (fFrom ? fFrom : "-") + " → ~" + fTo + " L/h trip threshold)";
+      }
+      return c.label + " (" + c.name + "): " + (c.from === null ? "—" : c.from) + " → " + c.to + extra;
     });
     window.hmiConfirm("Apply " + d.changes.length + (d.changes.length === 1 ? " change" : " changes") + "?\n\n" + lines.join("\n"), "Apply").then(function(ok){
       if (!ok) return;

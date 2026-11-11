@@ -69,6 +69,7 @@
     { name: 'SP_N4', group: 'NO3', label: 'SP_N3 dosing-loop deadband', unit: 'ppm', min: 0, max: 100 },
     { name: 'SP_N5', group: 'NO3', label: 'Auto dosing start/resume threshold', unit: 'ppm', min: 0, max: 1000 },
     { name: 'SP_N6', group: 'NO3', label: 'Auto dosing stop threshold', unit: 'ppm', min: 0, max: 1000 },
+    { name: 'AIT01_Installed', group: 'NO3', label: 'NO3 meter installed (0 = no: faults #17/#19/#21 ignored, fixed-flow dosing)', unit: '0/1', min: 0, max: 1 },
     { name: 'SP_F01', group: 'Dosing', label: 'Manual Dosing pump Flow', unit: 'ml/hr', min: 0, max: 2280 },
     { name: 'SP_F02', group: 'Dosing', label: 'NO3 Dosing pump Flow', unit: 'ml/hr', min: 0, max: 2280 },
     { name: 'SP_F03', group: 'Dosing', label: 'Dosing pump change step', unit: 'ml/hr', min: 0, max: 100 },
@@ -82,6 +83,7 @@
     { name: 'T_15', group: 'Timers', label: 'Time to change SP_F02', unit: 'min', min: 0, max: 65535 },
     { name: 'T_16', group: 'Timers', label: 'Step Timer', unit: 'sec', min: 0, max: 86400 },
     { name: 'T_17', group: 'Timers', label: 'LTCR rate window', unit: 'sec', min: 10, max: 3600 },
+    { name: 'T_20', group: 'Timers', label: 'Inlet low flow fault timer (FIT101)', unit: 'sec', min: 10, max: 3600 },
     { name: 'SP_C1', group: 'Cycles', label: 'Large cycles in a row (0 = none)', unit: 'cycles', min: 0, max: 99 },
     { name: 'SP_C2', group: 'Cycles', label: 'Small cycles in a row (0 = none)', unit: 'cycles', min: 0, max: 99 },
     { name: 'SP_L1_4mA', group: 'Calibration', label: 'LT01 raw ADC at 4mA', unit: 'counts', min: 0, max: 4095 },
@@ -894,9 +896,20 @@
       case 'T_16':
         if (typeof t.t_16 === 'number') return t.t_16 + ' s';
         return '0 s';
+      case 'T_20':
+        if (typeof t.FT101_Flow_Lh === 'number') return Math.round(t.FT101_Flow_Lh) + ' L/h (live)';
+        return '—';
       default:
         return '—';
     }
+  }
+
+  // Equivalent steady flow threshold (L/h) that will trigger the fault for a given pulse timeout (sec).
+  // At 1 Litre per pulse: threshold = 3600 / sec.
+  function flowTriggerFromTimer(sec) {
+    var n = Number(sec);
+    if (!isFinite(n) || n <= 0) return null;
+    return Math.round(3600.0 / n);
   }
 
   const HmiLogic = {
@@ -911,7 +924,7 @@
     HIDDEN_PAUSE_MS, IDLE_PAUSE_MS, hmiPauseReason, plcNotAnswering, LIVE_STALE_MS, liveDataState, migrateSavedLogin,
     emailRequestWrites, emailResetWrites, dailyEmailResultText, dailyEmailStatus, EMAIL_PAUSED_TEXT,
     CAL_INSTRUMENTS, PROCESS_SETPOINTS, cycleRunText, averageLast, currentValueFromMilliamps, zeroAdjust, twoPointRange, validateRange, validateRawCapture, validateElectrical, calibrationConfirmText,
-    currentValueForSetpoint,
+    currentValueForSetpoint, flowTriggerFromTimer,
   };
 
   if (typeof module !== 'undefined' && module.exports) {
