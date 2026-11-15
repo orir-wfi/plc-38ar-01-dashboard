@@ -667,7 +667,7 @@
         <button type="button" class="primary" data-mail-slot="recipient">Set</button>
         <span id="mailResult-recipient" style="font-size:12px"></span>
       </div>
-      <div id="mailAlertSlots"></div>
+      <p class="muted small" style="margin:6px 0 0">Alert emails are sent from the cloud (EMQX &rarr; Google Apps Script), not by the PLC. Edit alert recipients in the script.</p>
       <div class="row-line" style="margin-top:10px">
         <label for="emailReqDate">Day to send</label>
         <input type="date" id="emailReqDate" aria-describedby="emailReqHint">
@@ -2634,18 +2634,13 @@
     });
   });
 
-  // Email: 32 packed registers per slot ("recipient" = the daily-digest
-  // block, "alert0".."alert4" = the 5 alert-recipient slots), plus each
-  // slot's own apply coil. Mirrors daily_email.cpp's packString()/
+  // Email: 32 packed registers for the daily-digest recipient, plus its
+  // apply coil. (v77: the 5 alert-recipient slots are gone from the page -
+  // alert emails come from EMQX -> Apps Script, the PLC no longer sends them.) Mirrors daily_email.cpp's packString()/
   // unpackString() exactly (see hmi-logic.js).
   var MAIL_SLOTS = {
     recipient: { regPrefix: "Mail_Recipient_Reg", applyPoint: "Mail_Recipient_Apply", count: 32 },
   };
-  for (var slot = 0; slot < 5; slot++) {
-    MAIL_SLOTS["alert" + slot] = {
-      regPrefix: "Mail_Recipient_AlertReg" + slot + "_", applyPoint: "Mail_Recipient_AlertApply" + slot, count: 32,
-    };
-  }
 
   function mailRegPoints(slotDef){
     var pts = [];
@@ -2708,23 +2703,6 @@
     setMailSlot("recipient", document.getElementById("mailRecipient"), document.getElementById("mailResult-recipient"));
   });
 
-  var alertSlotsEl = document.getElementById("mailAlertSlots");
-  for (var s = 0; s < 5; s++) {
-    (function(slotKey, slotIndex){
-      var row = document.createElement("div");
-      row.className = "row-line";
-      row.innerHTML =
-        '<label style="font-size:13px;min-width:160px">Alert recipient ' + (slotIndex + 1) + '</label>' +
-        '<input type="email" style="flex:1;max-width:300px" id="mail-input-' + slotKey + '">' +
-        '<button type="button" class="primary" id="mail-set-' + slotKey + '">Set</button>' +
-        '<span id="mailResult-' + slotKey + '" style="font-size:12px"></span>';
-      row.querySelector("button").addEventListener("click", function(){
-        setMailSlot(slotKey, document.getElementById("mail-input-" + slotKey), document.getElementById("mailResult-" + slotKey));
-      });
-      alertSlotsEl.appendChild(row);
-    })("alert" + s, s);
-  }
-
   var emailWait = null;
   document.getElementById("sendDailyEmailNowBtn").addEventListener("click", function(){
     var resultEl = document.getElementById("sendDailyEmailResult");
@@ -2733,15 +2711,17 @@
     resultEl.textContent = "Sending...";
     // v66: with a fragmented heap the PLC pauses MQTT for the send (a few
     // minutes), so the result can come late and the trigger's own reply can
-    // time out even though the PLC took it.
+    // time out even though the PLC took it. v77: with enough heap it sends
+    // without the pause and both the reply and the result are usually lost
+    // (fixed in v78) - the email still goes out.
     function waitForResult(text){
       resultEl.textContent = text;
       clearTimeout(emailWait);
-      emailWait = setTimeout(function(){ emailWait = null; resultEl.textContent = "Triggered (no result reported within 10 min) - check the inbox"; }, 600000);
+      emailWait = setTimeout(function(){ emailWait = null; resultEl.textContent = "Result not reported - check the inbox (the email usually arrives within a few minutes)"; }, 600000);
     }
     sendDashBatchWrite(writes, function(resp){
       if (resp && resp.error === "timeout") {
-        waitForResult("No reply yet - the PLC may already be sending with its remote link paused; waiting for the result (up to 10 min)...");
+        waitForResult("No reply - the PLC is probably sending already; check the inbox in a few minutes. Waiting for a result (up to 10 min)...");
         return;
       }
       var out = HmiLogic.batchOutcome(resp);
