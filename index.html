@@ -154,7 +154,11 @@
   .trend-goto input, .trend-goto select{ background:var(--surface-2); border:1px solid var(--border); border-radius:6px; padding:5px 7px; font:inherit; font-size:13px; }
   .trend-readout{ min-height:18px; color:var(--ink-2); margin-bottom:4px; white-space:pre-wrap; }
   .trend-strip{ margin-bottom:2px; }
-  .trend-strip .strip-title{ font-size:11.5px; color:var(--ink-3); margin:4px 0 0; }
+  .trend-strip .strip-title{ display:flex; flex-wrap:wrap; justify-content:space-between; gap:2px 10px; font-size:11.5px; color:var(--ink-3); margin:4px 0 0; }
+  .trend-strip .strip-val{ font-size:13px; font-weight:600; color:var(--ink); font-variant-numeric:tabular-nums; }
+  .trend-strip .strip-val.pinned{ color:var(--accent); }
+  .trend-tools{ display:flex; gap:6px; align-items:center; flex-wrap:wrap; margin-bottom:4px; }
+  .trend-tools button{ padding:4px 10px; }
   .uplot, .uplot *{ font-family:"IBM Plex Sans",system-ui,sans-serif; }
   @media (max-width:600px){ .trend-controls .seg button{ padding:6px 10px; } }
 
@@ -548,9 +552,17 @@
         <button type="button" class="secondary" id="trendCancel" hidden>Cancel</button>
       </div>
       <p class="muted small" id="trendViewerNote" hidden>Showing data since this page opened. Sign in as operator to load history.</p>
+      <div class="trend-tools">
+        <span id="trendPinBar" hidden>
+          <button type="button" class="secondary" id="trendPinPrev" aria-label="Pin one sample earlier">◀</button>
+          <button type="button" class="secondary" id="trendPinNext" aria-label="Pin one sample later">▶</button>
+          <button type="button" class="secondary" id="trendUnpin">Unpin</button>
+        </span>
+        <button type="button" class="secondary" id="trendResetZoom" hidden>Reset zoom</button>
+      </div>
       <div class="trend-readout mono small" id="trendReadout">&nbsp;</div>
       <div id="trendStrips"></div>
-      <p class="muted small" style="margin:6px 0 0">Shaded band = lowest to highest value inside each point. ▲ red = alarm, gray tick = setpoint or input change.</p>
+      <p class="muted small" style="margin:6px 0 0">Tap or click a chart to pin that time (values show beside each title); drag to zoom, double-click or Reset zoom to undo. Shaded band = lowest to highest value inside each point. ▲ red = alarm, gray tick = setpoint or input change.</p>
     </div>
   </section>
 </div>
@@ -1899,7 +1911,11 @@
   // width; see the fix-round-3 report for the numbers.
   var RIGHT_PAD = 25;
 
-  var view = { hours: 2, live: true, id: null, asm: null, rows: [], mm: false, stepS: 10, events: [], lastChunkAt: 0, win: null };
+  var view = { hours: 2, live: true, id: null, asm: null, rows: [], mm: false, stepS: 10, events: [], lastChunkAt: 0, win: null,
+               pinT: null, zoom: null };
+  var ACCENT = tok("--accent");
+  var valEls = [];          // per value strip: the value span in its title row
+  var scaleQuiet = false;   // true while setData/setScale run from code - not a user zoom
   var sessionRows = [];            // viewer / fallback: telemetry since the page opened
   var plots = [];
   var watchdog = null;
@@ -1963,13 +1979,77 @@
   function cols(){ return currentCols; }
   function evs(){ return view.events; }
 
+  // Pinned time: a vertical marker on every strip (drawn after the series).
+  function pinPlugin(){
+    return { hooks: { draw: function(u){
+      if (view.pinT === null) return;
+      var x = u.valToPos(view.pinT, "x", true);
+      if (x < u.bbox.left || x > u.bbox.left + u.bbox.width) return;
+      var ctx = u.ctx;
+      ctx.save(); ctx.strokeStyle = ACCENT; ctx.lineWidth = 2 * devicePixelRatio;
+      ctx.beginPath(); ctx.moveTo(x, u.bbox.top); ctx.lineTo(x, u.bbox.top + u.bbox.height); ctx.stroke();
+      ctx.restore();
+    } } };
+  }
+
+  function pinIdx(){ return view.pinT === null ? null : HmiLogic.nearestIndex(currentCols.x, view.pinT); }
+
+  // Values beside each strip title: the hovered sample, else the pinned one.
+  function showValues(hoverIdx){
+    var hovering = hoverIdx !== null && hoverIdx !== undefined;
+    var idx = hovering ? hoverIdx : pinIdx();
+    var pinned = !hovering && idx !== null;
+    STRIPS.forEach(function(s, si){
+      var el = valEls[si]; if (!el) return;
+      el.textContent = HmiLogic.trendValueText(s.key, currentCols, idx, view.mm);
+      el.classList.toggle("pinned", pinned);
+    });
+    showReadout(idx, pinned);
+  }
+
+  function setPin(t){
+    view.pinT = t;
+    $("trendPinBar").hidden = t === null;
+    plots.forEach(function(p){ p.redraw(false, false); });
+    showValues(null);
+  }
+
+  // Drag-zoom on one strip moves every strip; a full-range scale = no zoom.
+  function onScale(u, key){
+    if (key !== "x" || scaleQuiet) return;
+    var mn = u.scales.x.min, mx = u.scales.x.max, xs = currentCols.x;
+    var full = !xs.length || (mn <= xs[0] && mx >= xs[xs.length - 1]);
+    view.zoom = full ? null : { min: mn, max: mx };
+    $("trendResetZoom").hidden = !view.zoom;
+    scaleQuiet = true;
+    plots.forEach(function(p){ if (p !== u) p.batch(function(){ p.setScale("x", { min: mn, max: mx }); }); });
+    scaleQuiet = false;
+  }
+
+  // Tap/click (not the end of a drag) pins the nearest sample; the same
+  // sample again unpins.
+  function bindPinClick(u){
+    var downX = null;
+    u.over.addEventListener("mousedown", function(e){ downX = e.clientX; });
+    u.over.addEventListener("click", function(e){
+      if (downX !== null && Math.abs(e.clientX - downX) > 4) return; // a drag-zoom
+      var xs = currentCols.x; if (!xs.length) return;
+      var idx = HmiLogic.nearestIndex(xs, u.posToVal(e.offsetX, "x"));
+      setPin(idx === pinIdx() ? null : xs[idx]);
+    });
+  }
+
   function makePlots(){
     $("trendStrips").innerHTML = "";
-    plots = [];
+    plots = []; valEls = [];
+    scaleQuiet = true;
     var hScale = isPhone() ? 0.7 : 1;
     STRIPS.forEach(function(s, si){
       var wrap = document.createElement("div"); wrap.className = "trend-strip";
-      var t = document.createElement("div"); t.className = "strip-title"; t.textContent = s.title;
+      var t = document.createElement("div"); t.className = "strip-title";
+      var tn = document.createElement("span"); tn.textContent = s.title;
+      var tv = document.createElement("span"); tv.className = "strip-val";
+      t.appendChild(tn); t.appendChild(tv); valEls.push(tv);
       wrap.appendChild(t); $("trendStrips").appendChild(wrap);
       var series = [{}], bands = [];
       s.series.forEach(function(se, k){
@@ -1995,11 +2075,12 @@
         axes: [{ show: false },
                { stroke: INK3, grid: { stroke: "#d9dcdd" }, size: 46 }],
         padding: [null, RIGHT_PAD, null, null],
-        plugins: [],
-        hooks: si === 0 ? { setCursor: [function(u){ showReadout(u.cursor.idx); }] } : {},
+        plugins: [pinPlugin()],
+        hooks: si === 0 ? { setCursor: [function(u){ showValues(u.cursor.idx); }], setScale: [onScale] } : { setScale: [onScale] },
       };
       var empty = [[]]; s.series.forEach(function(){ empty.push([], [], []); });
-      plots.push(new uPlot(opts, empty, wrap));
+      var p = new uPlot(opts, empty, wrap);
+      bindPinClick(p); plots.push(p);
     });
 
     // Step strip: the shared x-axis, the step-colour band and the event
@@ -2028,22 +2109,22 @@
       // the same x as the curves above instead of drifting ~21-24 px left.
       axes: [{ stroke: INK3, grid: { stroke: "#d9dcdd" }, show: true },
              { show: true, size: 46, stroke: "transparent", grid: { show: false }, ticks: { show: false } }],
-      plugins: [stepBandPlugin(cols, evs)],
+      plugins: [stepBandPlugin(cols, evs), pinPlugin()],
+      hooks: { setScale: [onScale] },
     };
-    plots.push(new uPlot(stepOpts, [[], []], stepWrap));
+    var sp = new uPlot(stepOpts, [[], []], stepWrap);
+    bindPinClick(sp); plots.push(sp);
+    scaleQuiet = false;
   }
 
-  function fmt(v, dec){ return v === null || v === undefined ? "—" : v.toFixed(dec); }
-  function showReadout(idx){
+  function showReadout(idx, pinned){
     var c = currentCols;
     if (idx === null || idx === undefined || !c.x.length) { $("trendReadout").innerHTML = "&nbsp;"; return; }
     var t = c.x[idx];
     var near = view.events.filter(function(e){ return Math.abs(e.t - t) <= view.stepS; })
       .map(function(e){ return HmiLogic.historyEventText(e); });
-    $("trendReadout").textContent = new Date(t * 1000).toLocaleString() + "   " +
-      c.step[idx] + "-" + c.cycle[idx] + "   TAYA 1 " + fmt(c.lt01.v[idx], 0) + " cm · TAYA 2 " + fmt(c.lt02.v[idx], 0) +
-      " cm · NO3 " + fmt(c.no3.v[idx], 1) + " ppm · Flow " + fmt(c.flow.v[idx], 0) + " L/h · Dosing " + fmt(c.dosing.v[idx], 0) + " mL/h" +
-      (near.length ? "\n" + near.join(" · ") : "");
+    $("trendReadout").textContent = (pinned ? "Pinned  " : "") + new Date(t * 1000).toLocaleString() + "   Step " +
+      c.step[idx] + "-" + c.cycle[idx] + (near.length ? "\n" + near.join(" · ") : "");
   }
 
   function redraw(){
@@ -2051,8 +2132,24 @@
     var data = buildData(currentCols);
     data.push([currentCols.x, currentCols.x.map(function(){ return 0; })]); // step strip: dummy series, never drawn (transparent) - only the plugin draws
     if (!plots.length) makePlots();
-    plots.forEach(function(p, i){ p.setData(data[i]); });
+    // batch(): uPlot otherwise applies scales (and fires setScale) in a
+    // later microtask, after scaleQuiet is false again - the data reset
+    // would then read as a user un-zoom.
+    scaleQuiet = true;
+    plots.forEach(function(p, i){
+      p.batch(function(){
+        p.setData(data[i]);
+        if (view.zoom) p.setScale("x", view.zoom);
+      });
+    });
+    scaleQuiet = false;
+    showValues(null);
   }
+
+  $("trendPinPrev").addEventListener("click", function(){ var i = pinIdx(); if (i !== null && i > 0) setPin(currentCols.x[i - 1]); });
+  $("trendPinNext").addEventListener("click", function(){ var i = pinIdx(); if (i !== null && i + 1 < currentCols.x.length) setPin(currentCols.x[i + 1]); });
+  $("trendUnpin").addEventListener("click", function(){ setPin(null); });
+  $("trendResetZoom").addEventListener("click", function(){ view.zoom = null; $("trendResetZoom").hidden = true; redraw(); });
 
   var trendsBusy = false;
   function setStatus(text){ $("trendStatus").textContent = text || ""; }
@@ -2086,6 +2183,7 @@
   function load(win, live){
     stopWatchdog();
     view.win = win; view.live = live; view.rows = []; view.events = []; view.mm = false;
+    view.pinT = null; view.zoom = null; $("trendPinBar").hidden = true; $("trendResetZoom").hidden = true;
     view.stepS = HmiLogic.historyStepSeconds(win.to - win.from);
     view.asm = null; view.id = null;
     redraw();

@@ -494,6 +494,34 @@
     return out;
   }
 
+  // Trends pin/cursor (2026-11-15): index of the sample closest to t in a
+  // sorted x array, null when there is none.
+  function nearestIndex(xs, t) {
+    if (!xs.length) return null;
+    let lo = 0, hi = xs.length - 1;
+    while (hi - lo > 1) { const mid = (lo + hi) >> 1; if (xs[mid] <= t) lo = mid; else hi = mid; }
+    return Math.abs(xs[hi] - t) < Math.abs(xs[lo] - t) ? hi : lo;
+  }
+
+  const TREND_VALUE_SERIES = {
+    levels: [['lt01', 'TAYA 1', 0, 'cm'], ['lt02', 'TAYA 2', 0, 'cm']],
+    no3:    [['no3', 'NO3', 1, 'ppm']],
+    flow:   [['flow', 'Flow', 0, 'L/h']],
+    dosing: [['dosing', 'Dosing', 0, 'mL/h']],
+  };
+  // One strip's values at idx, e.g. "TAYA 1 120 (110–130) cm · TAYA 2 95 cm";
+  // the (lo–hi) range only when downsampled and the bucket isn't flat.
+  function trendValueText(stripKey, cols, idx, mm) {
+    if (idx === null || idx === undefined || !cols.x.length) return '';
+    return (TREND_VALUE_SERIES[stripKey] || []).map(([key, label, dec, unit]) => {
+      const c = cols[key], v = c.v[idx];
+      if (v === null || v === undefined) return label + ' —';
+      const lo = c.lo[idx], hi = c.hi[idx];
+      const range = mm && lo !== hi ? ' (' + lo.toFixed(dec) + '–' + hi.toFixed(dec) + ')' : '';
+      return label + ' ' + v.toFixed(dec) + range + ' ' + unit;
+    }).join(' · ');
+  }
+
   // liveRow is a plain row (values, not [min,max]). Returns a new array.
   function historyAppendLive(rows, mm, stepS, liveRow, windowS) {
     const out = rows.filter(r => r[0] > liveRow[0] - windowS);
@@ -920,7 +948,7 @@
     validateNumber, setpointDiff, pumpState, transferRate, dosingText, batchOutcome, alarmSummary, mainSwitchStatus,
     createRing, sparklinePath, DEMO_FRAMES, describeBoot, sdCardStatus, rebootReplyText, isNewBoot,
     historyWindow, historyWindowAt, historyStepSeconds, createHistoryAssembler, historyColumns,
-    historyAppendLive, telemetryToHistoryRow, historyEventText, historyErrorText, historyNeedsReload, historyStillBusy, stepShade, demoHistoryChunks,
+    historyAppendLive, nearestIndex, trendValueText, telemetryToHistoryRow, historyEventText, historyErrorText, historyNeedsReload, historyStillBusy, stepShade, demoHistoryChunks,
     HIDDEN_PAUSE_MS, IDLE_PAUSE_MS, hmiPauseReason, plcNotAnswering, LIVE_STALE_MS, liveDataState, migrateSavedLogin,
     emailRequestWrites, emailResetWrites, dailyEmailResultText, dailyEmailStatus, EMAIL_PAUSED_TEXT,
     CAL_INSTRUMENTS, PROCESS_SETPOINTS, cycleRunText, averageLast, currentValueFromMilliamps, zeroAdjust, twoPointRange, validateRange, validateRawCapture, validateElectrical, calibrationConfirmText,
